@@ -7,8 +7,8 @@ Here you will find a self-hosted **Bitwarden client template provisioner** you c
 - BW FrontEnd is a **self-hosted example / framework**. Review and adapt it for your org before relying on it in production
 - There is **no Bitwarden user login** in the app. Operators use a local admin/member account; Bitwarden org + vault credentials are stored encrypted server-side
 - Requires a Bitwarden **Enterprise** Cloud org with **nested collections** enabled
-- Default `docker-compose.yml` runs **only the app**. Put HTTPS (reverse proxy or your own tunnel) in front for anything beyond local use, and set `COOKIE_SECURE=true`
-- Never commit real `.env` files, `./data`, or tunnel credential JSON — generate a unique `APP_SECRET` (32+ characters) per deployment
+- Run it with Docker on your own host or internal network. How you expose it (LAN only, reverse proxy, HTTPS, etc.) is up to your organization
+- Never commit real `.env` files or `./data` — generate a unique `APP_SECRET` (32+ characters) per deployment
 
 *Additional documentation to help you get started:*<br>
 [Password Manager CLI Guide](https://bitwarden.com/help/cli/)<br>
@@ -25,17 +25,31 @@ Here you will find a self-hosted **Bitwarden client template provisioner** you c
 4. Applies admin-configured Bitwarden **group** View/Edit access on new Software/Hardware collections
 5. Lets an admin upload an optional organization logo (**Settings → Branding**) for header / login / setup; the Bitwarden footer logo remains
 
-## Run with Docker
+## Getting started (Docker)
+
+**Requirements:** Docker and Docker Compose on the host where you want to run the app.
+
+1. Clone this repository and enter the project directory
+2. Copy the env template and set a strong secret:
 
 ```bash
 cp .env.example .env
-# Set APP_SECRET to a long random string (32+ characters). Do not reuse the example value.
+```
 
+Edit `.env` and set `APP_SECRET` to a long random string (32+ characters). Do not reuse the example value.
+
+3. Build and start:
+
+```bash
 docker compose up -d --build
 ```
 
-- App: http://localhost:3000
-- Data (SQLite + Bitwarden CLI home + uploaded branding) persists in `./data` (gitignored)
+4. Open http://localhost:3000 (or `http://<host>:3000` on your network)
+5. Complete **Create admin** on first load (`/setup`), then configure Bitwarden under **Settings**
+
+Data (SQLite + Bitwarden CLI home + uploaded branding) persists in `./data` on the host (gitignored). Stop with `docker compose down`; data remains unless you delete `./data`.
+
+If you terminate TLS in front of the app (recommended for anything beyond local use), set `COOKIE_SECURE=true` in `.env` and recreate the container.
 
 ### Environment
 
@@ -45,10 +59,6 @@ docker compose up -d --build
 | `CREDENTIALS_KEY` | No | Alias used if `APP_SECRET` is unset |
 | `COOKIE_SECURE` | No | Set `true` when serving over HTTPS |
 | `DATA_DIR` | No | Defaults to `/app/data` in Docker |
-
-### Optional Cloudflare Tunnel
-
-An example config lives at [`cloudflared/config.example.yml`](cloudflared/config.example.yml). Copy it, fill in your tunnel ID and hostname, mount your credentials JSON (never commit it), and run `cloudflared` yourself or via a compose overlay.
 
 ## First-load setup
 
