@@ -1,4 +1,4 @@
-import { jsonError, jsonOk, withAuth } from "@/lib/api";
+import { jsonError, jsonOk, withAdmin } from "@/lib/api";
 import { testOrgConnection } from "@/lib/bitwarden/public-api";
 import { testVaultConnection } from "@/lib/bitwarden/vault";
 import { loadSettings, settingsReady } from "@/lib/settings";
@@ -6,7 +6,7 @@ import { loadSettings, settingsReady } from "@/lib/settings";
 export const runtime = "nodejs";
 
 export async function POST() {
-  return withAuth(async () => {
+  return withAdmin(async () => {
     const settings = loadSettings();
     if (!settingsReady(settings)) {
       return jsonError(

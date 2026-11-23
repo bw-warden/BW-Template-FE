@@ -2,8 +2,15 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { BrandLogo } from "@/components/BrandLogo";
 
-export function AppHeader({ email }: { email: string | null }) {
+export function AppHeader({
+  email,
+  isAdmin = false,
+}: {
+  email: string | null;
+  isAdmin?: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -15,15 +22,21 @@ export function AppHeader({ email }: { email: string | null }) {
 
   const links = [
     { href: "/", label: "Provision" },
-    { href: "/templates", label: "Templates" },
-    { href: "/settings", label: "Settings" },
+    ...(isAdmin
+      ? [
+          { href: "/clients", label: "Clients" },
+          { href: "/templates", label: "Templates" },
+          { href: "/users", label: "Users" },
+          { href: "/settings", label: "Settings" },
+        ]
+      : []),
   ];
 
   return (
     <header className="site-header">
       <div className="brand">
-        <div className="brand-mark">BW Konica</div>
-        <div className="brand-sub">Client template provisioner</div>
+        <BrandLogo height={36} />
+        <div className="brand-sub">BW FrontEnd — client template provisioner</div>
       </div>
       <nav className="nav-links" aria-label="Primary">
         {links.map((l) => (

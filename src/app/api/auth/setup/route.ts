@@ -31,7 +31,7 @@ export async function POST(request: Request) {
 
   const id = uuidv4();
   const passwordHash = await bcrypt.hash(parsed.data.password, 12);
-  createUser(id, parsed.data.email, passwordHash);
+  createUser(id, parsed.data.email, passwordHash, "admin");
 
   const session = await getSession();
   session.userId = id;

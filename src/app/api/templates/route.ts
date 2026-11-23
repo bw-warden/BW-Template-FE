@@ -1,37 +1,26 @@
 import { z } from "zod";
-import { jsonError, jsonOk, withAuth } from "@/lib/api";
-import {
-  ensureRootCollection,
-  findCollectionByName,
-  listCollections,
-} from "@/lib/bitwarden/public-api";
+import { jsonError, jsonOk, withAdmin, withAuth } from "@/lib/api";
 import {
   createTemplateItem,
   listItemsInCollection,
+  syncNow,
   toSafeTemplate,
   VaultField,
 } from "@/lib/bitwarden/vault";
 import { loadSettings, settingsReady } from "@/lib/settings";
+import { templatesCollection as templatesCollectionId } from "@/lib/templates";
+import { REQUIRED_FIELD_NAME } from "@/lib/template-fields";
 
 export const runtime = "nodejs";
 
-async function templatesCollectionId() {
-  const settings = loadSettings();
-  if (!settingsReady(settings)) {
-    throw new Error("Bitwarden settings not configured");
-  }
-  const rootName = settings!.templatesRootName || "Templates";
-  const collections = await listCollections(settings!);
-  let col = findCollectionByName(collections, rootName);
-  if (!col) {
-    col = await ensureRootCollection(settings!, rootName);
-  }
-  return { settings: settings!, collectionId: col.id };
-}
-
-export async function GET() {
+export async function GET(request: Request) {
   return withAuth(async () => {
     try {
+      const fresh = new URL(request.url).searchParams.get("fresh") === "1";
+      if (fresh) {
+        const settings = loadSettings();
+        if (settingsReady(settings)) await syncNow(settings!);
+      }
       const { settings, collectionId } = await templatesCollectionId();
       const items = await listItemsInCollection(settings, collectionId);
       return jsonOk({
@@ -44,9 +33,13 @@ export async function GET() {
 }
 
 const FieldSchema = z.object({
-  name: z.string().min(1),
+  name: z
+    .string()
+    .min(1)
+    .refine((name) => name.trim() !== REQUIRED_FIELD_NAME, "That field name is reserved"),
   value: z.string().default(""),
   type: z.number().int().min(0).max(2).default(0),
+  required: z.boolean().optional(),
 });
 
 const CreateSchema = z.object({
@@ -57,7 +50,7 @@ const CreateSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  return withAuth(async () => {
+  return withAdmin(async () => {
     let body: unknown;
     try {
       body = await request.json();

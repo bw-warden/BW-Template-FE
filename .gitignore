@@ -35,6 +35,11 @@ yarn-error.log*
 # app data
 /data/
 
+# Cloudflare tunnel secrets / local overrides (keep *.example.yml)
+cloudflared/*.json
+cloudflared/config.yml
+*.cfargotunnel*
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import { z } from "zod";
 import { jsonError, jsonOk } from "@/lib/api";
 import { findUserByEmail } from "@/lib/db";
+import { syncGroupsInBackground } from "@/lib/groups";
 import { getSession } from "@/lib/session";
 
 export const runtime = "nodejs";
@@ -39,6 +40,9 @@ export async function POST(request: Request) {
   session.email = user.email;
   session.isLoggedIn = true;
   await session.save();
+
+  // Warm Bitwarden group cache without blocking login.
+  syncGroupsInBackground();
 
   return jsonOk({ ok: true, email: user.email });
 }

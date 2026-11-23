@@ -1,128 +1,251 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ClientOption, ClientTypeahead } from "@/components/ClientTypeahead";
+import { LoadingModal } from "@/components/LoadingModal";
+import { NewItemModal, Target } from "@/components/NewItemModal";
+import { ProgressBar } from "@/components/ProgressBar";
 
 type SafeTemplate = {
   id: string;
   name: string;
   type: number;
-  fields: Array<{ name: string; type: number }>;
+  fields: Array<{ name: string; type: number; required?: boolean }>;
 };
 
-type ApplyResult = {
-  ok: boolean;
-  client: ClientOption;
-  target: "software" | "hardware";
-  results: Array<{
-    templateId: string;
-    ok: boolean;
-    itemId?: string;
-    name?: string;
-    error?: string;
-  }>;
+type AddedItem = { name: string; target: Target; at: number };
+
+const ITEM_TYPE_LABELS: Record<number, string> = {
+  1: "Login",
+  2: "Secure note",
+  3: "Card",
+  4: "Identity",
+  5: "SSH key",
 };
 
-const STEPS = ["Client", "Templates", "Confirm", "Result"] as const;
+function itemTypeLabel(type: number): string {
+  return ITEM_TYPE_LABELS[type] ?? "Item";
+}
 
-export function ProvisionWizard({ configured }: { configured: boolean }) {
+const TARGET_LABEL: Record<Target, string> = {
+  software: "Software",
+  hardware: "Hardware",
+};
+
+const STEPS = ["Client", "Add items"] as const;
+
+async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data as T;
+}
+
+type Loader = { label: string; detail?: string; error?: string | null };
+
+export function ProvisionWizard({
+  configured,
+  isAdmin = false,
+}: {
+  configured: boolean;
+  isAdmin?: boolean;
+}) {
   const [step, setStep] = useState(0);
-  const [clientsRoot, setClientsRoot] = useState("Clients");
+  const [clients, setClients] = useState<ClientOption[] | null>(null);
   const [client, setClient] = useState<ClientOption | null>(null);
   const [templates, setTemplates] = useState<SafeTemplate[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [target, setTarget] = useState<"software" | "hardware">("software");
-  const [loadingTemplates, setLoadingTemplates] = useState(false);
-  const [applying, setApplying] = useState(false);
+  const [templatesLoaded, setTemplatesLoaded] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [target, setTarget] = useState<Target>("software");
+  const [counts, setCounts] = useState<Record<Target, number> | null>(null);
+  const [bumped, setBumped] = useState<Target | null>(null);
+  const [modalTemplate, setModalTemplate] = useState<SafeTemplate | null>(null);
+  const [added, setAdded] = useState<AddedItem[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ApplyResult | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loader, setLoader] = useState<Loader | null>(null);
+  const templatesRequest = useRef<Promise<void> | null>(null);
 
-  useEffect(() => {
-    if (!configured) return;
-    let cancelled = false;
-    (async () => {
-      setLoadingTemplates(true);
-      try {
-        const [clientsRes, templatesRes] = await Promise.all([
-          fetch("/api/clients"),
-          fetch("/api/templates"),
-        ]);
-        const clientsData = await clientsRes.json();
-        const templatesData = await templatesRes.json();
-        if (!cancelled) {
-          if (clientsRes.ok) setClientsRoot(clientsData.clientsRoot || "Clients");
-          if (templatesRes.ok) setTemplates(templatesData.templates || []);
-          if (!templatesRes.ok) {
-            setError(templatesData.error || "Failed to load templates");
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      } finally {
-        if (!cancelled) setLoadingTemplates(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [configured]);
-
-  async function createClient(name: string) {
-    const res = await fetch("/api/clients", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to create client");
-    return data.client as ClientOption;
+  // One in-flight templates request shared by the background preload and client open.
+  function ensureTemplates(): Promise<void> {
+    if (!templatesRequest.current) {
+      templatesRequest.current = getJson<{ templates: SafeTemplate[] }>("/api/templates")
+        .then((data) => {
+          setTemplates(data.templates || []);
+          setTemplatesLoaded(true);
+        })
+        .catch((err) => {
+          templatesRequest.current = null;
+          throw err;
+        });
+    }
+    return templatesRequest.current;
   }
 
-  function toggleTemplate(id: string) {
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
+  // Each loader run gets an id; cancelling bumps it so late results are ignored.
+  const opRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  function startOp(next: Loader): { id: number; signal: AbortSignal } {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    opRef.current += 1;
+    setLoader(next);
+    return { id: opRef.current, signal: controller.signal };
   }
 
-  async function apply() {
-    if (!client) return;
-    setApplying(true);
+  const isCurrent = (id: number) => opRef.current === id;
+
+  function cancelLoader() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    opRef.current += 1;
+    setLoader(null);
+  }
+
+  async function loadClients() {
     setError(null);
+    const op = startOp({ label: "Loading", detail: "Reading clients from Bitwarden" });
     try {
-      const res = await fetch("/api/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId: client.id,
-          target,
-          templateIds: selected,
-        }),
+      const data = await getJson<{ clients: ClientOption[] }>("/api/clients", {
+        signal: op.signal,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Apply failed");
-      setResult(data as ApplyResult);
-      setStep(3);
+      if (!isCurrent(op.id)) return;
+      setClients(data.clients || []);
+      setLoader(null);
+      // Vault is unlocked now; warm templates so opening a client is quick.
+      ensureTemplates().catch(() => {});
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setApplying(false);
+      if (!isCurrent(op.id)) return;
+      setLoader({
+        label: "Loading",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
-  function reset() {
+  useEffect(() => {
+    if (configured) void loadClients();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configured]);
+
+  async function openClient(c: ClientOption) {
+    setError(null);
+    const op = startOp({ label: "Loading", detail: `Opening ${c.name}` });
+    try {
+      // Sequential: the vault CLI shares one session and sync state.
+      await ensureTemplates();
+      if (!isCurrent(op.id)) return;
+      const data = await getJson<{ software: number; hardware: number }>(
+        `/api/clients/${c.id}/counts`,
+        { signal: op.signal },
+      );
+      if (!isCurrent(op.id)) return;
+      setClient(c);
+      setCounts({ software: data.software, hardware: data.hardware });
+      setAdded([]);
+      setFilter("");
+      setStep(1);
+      setLoader(null);
+    } catch (err) {
+      if (!isCurrent(op.id)) return;
+      setError(err instanceof Error ? err.message : String(err));
+      setLoader(null);
+    }
+  }
+
+  function addClient(created: ClientOption) {
+    setClients((prev) =>
+      prev && !prev.some((c) => c.id === created.id)
+        ? [...prev, created].sort((a, b) => a.name.localeCompare(b.name))
+        : prev,
+    );
+  }
+
+  async function createClient(name: string) {
+    setError(null);
+    const op = startOp({
+      label: `Creating ${name}`,
+      detail: "Setting up Software and Hardware",
+    });
+    // Not aborted on cancel: the server finishes creating, so keep the result.
+    let created: ClientOption;
+    try {
+      const data = await getJson<{ client: ClientOption }>("/api/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      created = data.client;
+    } catch (err) {
+      if (!isCurrent(op.id)) return;
+      setError(err instanceof Error ? err.message : String(err));
+      setLoader(null);
+      return;
+    }
+    addClient(created);
+    if (isCurrent(op.id)) await openClient(created);
+  }
+
+  const visibleTemplates = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return templates;
+    return templates.filter(
+      (t) =>
+        t.name.toLowerCase().includes(q) ||
+        t.fields.some((f) => f.name.toLowerCase().includes(q)),
+    );
+  }, [templates, filter]);
+
+  function onSaved(result: { target: Target; count: number; name: string }) {
+    setModalTemplate(null);
+    setTarget(result.target);
+    setCounts((prev) => ({
+      software: prev?.software ?? 0,
+      hardware: prev?.hardware ?? 0,
+      [result.target]: result.count,
+    }));
+    setBumped(result.target);
+    setTimeout(() => setBumped(null), 1200);
+    setAdded((prev) => [
+      { name: result.name, target: result.target, at: Date.now() },
+      ...prev,
+    ]);
+  }
+
+  async function refresh() {
+    if (!client || refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      // Counts sync the vault first, so the template list after it is current too.
+      const countsData = await getJson<{ software: number; hardware: number }>(
+        `/api/clients/${client.id}/counts?fresh=1`,
+      );
+      setCounts({ software: countsData.software, hardware: countsData.hardware });
+
+      const tplData = await getJson<{ templates: SafeTemplate[] }>("/api/templates");
+      setTemplates(tplData.templates || []);
+      setTemplatesLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  function changeClient() {
     setStep(0);
-    setSelected([]);
-    setResult(null);
     setError(null);
   }
 
   if (!configured) {
     return (
       <div className="banner banner-warn">
-        Bitwarden settings are incomplete. Open Settings, save org + vault
-        credentials, then return here.
+        {isAdmin
+          ? "Bitwarden settings are incomplete. Open Settings, save org + vault credentials, then return here."
+          : "Bitwarden is not connected yet. Ask an admin to finish Settings."}
       </div>
     );
   }
@@ -142,36 +265,81 @@ export function ProvisionWizard({ configured }: { configured: boolean }) {
         ))}
       </div>
 
-      {error && <div className="banner banner-error" style={{ marginBottom: 16 }}>{error}</div>}
-
-      {step === 0 && (
-        <div className="panel">
-          <h2 className="panel-title">Choose or create a client</h2>
-          <ClientTypeahead
-            clientsRoot={clientsRoot}
-            value={client}
-            onSelect={setClient}
-            onCreate={createClient}
-          />
-          <div className="btn-row" style={{ marginTop: 16 }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={!client}
-              onClick={() => setStep(1)}
-            >
-              Continue
-            </button>
-          </div>
+      {error && (
+        <div className="banner banner-error" style={{ marginBottom: 16 }}>
+          {error}
         </div>
       )}
 
-      {step === 1 && (
+      {step === 0 && clients && (
         <div className="panel">
-          <h2 className="panel-title">Select templates & target</h2>
-          <p className="muted" style={{ marginTop: 0 }}>
-            Clones are created as new items in the chosen collection. Templates
-            stay untouched.
+          <h2 className="panel-title">Choose or create a client</h2>
+          <ClientTypeahead
+            clients={clients}
+            value={client}
+            disabled={Boolean(loader)}
+            onSelect={(c) => void openClient(c)}
+            onCreate={(name) => void createClient(name)}
+          />
+        </div>
+      )}
+
+      {step === 0 && !clients && !loader && (
+        <div className="panel">
+          <h2 className="panel-title">Choose or create a client</h2>
+          <p className="muted">The client list hasn’t been loaded.</p>
+          <button type="button" className="btn btn-primary" onClick={() => void loadClients()}>
+            Load clients
+          </button>
+        </div>
+      )}
+
+      {loader && (
+        <LoadingModal
+          label={loader.label}
+          detail={loader.detail}
+          error={loader.error}
+          onRetry={loader.error ? () => void loadClients() : undefined}
+          onCancel={cancelLoader}
+        />
+      )}
+
+      {step === 1 && client && (
+        <div className="panel">
+          <div className="panel-head">
+            <h2 className="panel-title" style={{ margin: 0 }}>
+              Add items to {client.name}
+            </h2>
+            <div className="btn-row">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={refreshing}
+                onClick={() => void refresh()}
+                title="Reload item counts and templates from Bitwarden"
+              >
+                {refreshing ? "Refreshing…" : "↻ Refresh"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={refreshing}
+                onClick={changeClient}
+              >
+                Change client
+              </button>
+            </div>
+          </div>
+          {refreshing && (
+            <ProgressBar
+              label={`Refreshing ${client.name} from Bitwarden…`}
+              expectedMs={9000}
+              stages={["Syncing vault", "Counting items", "Reloading templates"]}
+            />
+          )}
+          <p className="muted" style={{ marginTop: 6 }}>
+            Choose a collection, then press + on a template to fill in a new item.
+            Templates stay untouched.
           </p>
 
           <div className="target-toggle" style={{ marginBottom: 16 }}>
@@ -183,139 +351,130 @@ export function ProvisionWizard({ configured }: { configured: boolean }) {
                 data-selected={target === t ? "true" : "false"}
                 onClick={() => setTarget(t)}
               >
-                <strong>{t === "software" ? "Software" : "Hardware"}</strong>
-                <div className="muted">
-                  {clientsRoot} / {client?.name} /{" "}
-                  {t === "software" ? "Software" : "Hardware"}
+                <div className="target-option-head">
+                  <strong>{TARGET_LABEL[t]}</strong>
+                  <span
+                    className="count-badge"
+                    data-bumped={bumped === t ? "true" : "false"}
+                    aria-label={`${counts?.[t] ?? 0} items`}
+                  >
+                    {`${counts?.[t] ?? 0} item${counts?.[t] === 1 ? "" : "s"}`}
+                  </span>
                 </div>
               </button>
             ))}
           </div>
 
-          {loadingTemplates && <div className="empty">Loading templates…</div>}
-          {!loadingTemplates && templates.length === 0 && (
+          {templatesLoaded && templates.length === 0 && (
             <div className="empty">
-              No templates found. Add items under Templates in Bitwarden (or use
-              the Templates page).
+              {isAdmin
+                ? "No templates found. Add some on the Templates page."
+                : "No templates are available yet. Ask an admin to add some."}
             </div>
           )}
 
-          <div className="template-grid">
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className="template-card"
-                data-selected={selected.includes(t.id) ? "true" : "false"}
-                onClick={() => toggleTemplate(t.id)}
-                aria-pressed={selected.includes(t.id)}
-              >
-                <div className="template-name">{t.name}</div>
-                <div className="chips">
-                  {(t.fields.length ? t.fields : [{ name: "No custom fields", type: 0 }]).map(
-                    (f) => (
-                      <span key={`${t.id}-${f.name}`} className="chip">
-                        {f.name}
-                      </span>
-                    ),
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
+          {templates.length > 0 && (
+            <>
+              <div className="table-toolbar">
+                <input
+                  className="field"
+                  type="search"
+                  placeholder="Filter templates…"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  aria-label="Filter templates"
+                />
+              </div>
 
-          <div className="btn-row" style={{ marginTop: 16 }}>
-            <button type="button" className="btn btn-secondary" onClick={() => setStep(0)}>
-              Back
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={selected.length === 0}
-              onClick={() => setStep(2)}
-            >
-              Continue
-            </button>
-          </div>
+              <div className="table-wrap">
+                <table className="template-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Template</th>
+                      <th scope="col">Type</th>
+                      <th scope="col">Fields</th>
+                      <th scope="col" className="col-action">
+                        <span className="sr-only">Add</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleTemplates.map((t) => (
+                      <tr key={t.id} onClick={() => setModalTemplate(t)}>
+                        <td className="template-name-cell">{t.name}</td>
+                        <td className="muted">{itemTypeLabel(t.type)}</td>
+                        <td>
+                          {t.fields.length ? (
+                            <div className="chips">
+                              {t.fields.map((f) => (
+                                <span
+                                  key={`${t.id}-${f.name}`}
+                                  className={f.required ? "chip chip-required" : "chip"}
+                                  title={f.required ? "Required" : undefined}
+                                >
+                                  {f.name}
+                                  {f.required ? <span className="req-mark"> *</span> : null}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="muted">None</span>
+                          )}
+                        </td>
+                        <td className="col-action">
+                          <button
+                            type="button"
+                            className="row-toggle"
+                            aria-label={`New item from ${t.name}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setModalTemplate(t);
+                            }}
+                          >
+                            +
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {visibleTemplates.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="muted">
+                          No templates match “{filter}”.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {added.length > 0 && (
+            <div className="added-log">
+              <div className="modal-section-title">Added this session</div>
+              <ul>
+                {added.map((a) => (
+                  <li key={a.at}>
+                    <strong>{a.name}</strong>
+                    <span className="muted"> → {TARGET_LABEL[a.target]}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
-      {step === 2 && client && (
-        <div className="panel">
-          <h2 className="panel-title">Confirm apply</h2>
-          <p>
-            Create <strong>{selected.length}</strong> new item
-            {selected.length === 1 ? "" : "s"} in{" "}
-            <code>
-              {clientsRoot}/{client.name}/
-              {target === "software" ? "Software" : "Hardware"}
-            </code>
-          </p>
-          <ul>
-            {templates
-              .filter((t) => selected.includes(t.id))
-              .map((t) => (
-                <li key={t.id}>{t.name}</li>
-              ))}
-          </ul>
-          <div className="btn-row">
-            <button type="button" className="btn btn-secondary" onClick={() => setStep(1)}>
-              Back
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={applying}
-              onClick={() => void apply()}
-            >
-              {applying ? "Applying…" : "Apply templates"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {step === 3 && result && (
-        <div className="panel">
-          <h2 className="panel-title">Result</h2>
-          <div
-            className={`banner ${result.ok ? "banner-ok" : "banner-warn"}`}
-            style={{ marginBottom: 12 }}
-          >
-            {result.ok
-              ? "All clones created successfully."
-              : "Finished with some errors — see details below."}
-          </div>
-          <ul>
-            {result.results.map((r) => (
-              <li key={r.templateId}>
-                {r.ok ? (
-                  <>
-                    Created <strong>{r.name}</strong> ({r.itemId})
-                  </>
-                ) : (
-                  <>
-                    Failed ({r.templateId}): {r.error}
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-          <div className="btn-row">
-            <button type="button" className="btn btn-primary" onClick={reset}>
-              Provision another
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setStep(1);
-                setResult(null);
-              }}
-            >
-              Add more to {result.client.name}
-            </button>
-          </div>
-        </div>
+      {modalTemplate && client && (
+        <NewItemModal
+          templateId={modalTemplate.id}
+          templateName={modalTemplate.name}
+          clientId={client.id}
+          clientName={client.name}
+          defaultTarget={target}
+          onClose={() => setModalTemplate(null)}
+          onSaved={onSaved}
+        />
       )}
     </div>
   );

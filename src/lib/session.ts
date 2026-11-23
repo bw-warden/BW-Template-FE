@@ -1,10 +1,17 @@
 import { getIronSession, SessionOptions } from "iron-session";
 import { cookies } from "next/headers";
+import { findUserById, UserRole } from "@/lib/db";
 
 export type SessionData = {
   userId?: string;
   email?: string;
   isLoggedIn: boolean;
+};
+
+export type AppUser = {
+  id: string;
+  email: string;
+  role: UserRole;
 };
 
 function sessionOptions(): SessionOptions {
@@ -16,10 +23,10 @@ function sessionOptions(): SessionOptions {
   }
   return {
     password,
-    cookieName: "bw_konica_session",
+    cookieName: "bw_frontend_session",
     cookieOptions: {
       httpOnly: true,
-      // HTTP LAN/public port 3000 for external testers — set COOKIE_SECURE=true behind TLS
+      // Set COOKIE_SECURE=true when serving over HTTPS (reverse proxy / TLS)
       secure: process.env.COOKIE_SECURE === "true",
       sameSite: "lax",
       path: "/",
@@ -31,10 +38,15 @@ export async function getSession() {
   return getIronSession<SessionData>(await cookies(), sessionOptions());
 }
 
-export async function requireSession() {
+/** Role comes from the DB on every call so deletes and role changes apply immediately. */
+export async function getCurrentUser(): Promise<AppUser | null> {
   const session = await getSession();
-  if (!session.isLoggedIn || !session.userId) {
-    return null;
-  }
-  return session;
+  if (!session.isLoggedIn || !session.userId) return null;
+  const user = findUserById(session.userId);
+  if (!user) return null;
+  return { id: user.id, email: user.email, role: user.role };
+}
+
+export async function requireSession() {
+  return getCurrentUser();
 }

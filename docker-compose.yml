@@ -1,7 +1,7 @@
 services:
   app:
     build: .
-    container_name: bw-konica
+    container_name: bw-frontend
     ports:
       - "3000:3000"
     environment:

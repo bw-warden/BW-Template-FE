@@ -1,19 +1,47 @@
 import { z } from "zod";
-import { jsonError, jsonOk, withAuth } from "@/lib/api";
+import { jsonError, jsonOk, withAdmin, withAuth } from "@/lib/api";
 import {
   deleteTemplateItem,
+  getItem,
   toSafeTemplate,
+  toTemplateForm,
   updateTemplateItem,
   VaultField,
 } from "@/lib/bitwarden/vault";
 import { loadSettings, settingsReady } from "@/lib/settings";
+import { templatesCollection } from "@/lib/templates";
+import { REQUIRED_FIELD_NAME } from "@/lib/template-fields";
 
 export const runtime = "nodejs";
 
+/** Form defaults for the new-item modal. Any signed-in user. */
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  return withAuth(async () => {
+    const { id } = await context.params;
+    try {
+      const { settings, collectionId } = await templatesCollection();
+      const item = await getItem(settings, id);
+      if (!(item.collectionIds ?? []).includes(collectionId)) {
+        return jsonError("Template not found", 404);
+      }
+      return jsonOk({ template: toTemplateForm(item) });
+    } catch (err) {
+      return jsonError(err instanceof Error ? err.message : String(err), 500);
+    }
+  });
+}
+
 const FieldSchema = z.object({
-  name: z.string().min(1),
+  name: z
+    .string()
+    .min(1)
+    .refine((name) => name.trim() !== REQUIRED_FIELD_NAME, "That field name is reserved"),
   value: z.string().default(""),
   type: z.number().int().min(0).max(2).default(0),
+  required: z.boolean().optional(),
 });
 
 const UpdateSchema = z.object({
@@ -26,7 +54,7 @@ export async function PUT(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  return withAuth(async () => {
+  return withAdmin(async () => {
     const { id } = await context.params;
     const settings = loadSettings();
     if (!settingsReady(settings)) {
@@ -62,7 +90,7 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  return withAuth(async () => {
+  return withAdmin(async () => {
     const { id } = await context.params;
     const settings = loadSettings();
     if (!settingsReady(settings)) {

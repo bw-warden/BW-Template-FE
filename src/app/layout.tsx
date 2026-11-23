@@ -1,21 +1,21 @@
 import type { Metadata } from "next";
-import { Fraunces, Source_Sans_3 } from "next/font/google";
+import { Montserrat, Open_Sans } from "next/font/google";
 import "./globals.css";
 
-const display = Fraunces({
+const display = Montserrat({
   variable: "--font-display",
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: ["600", "700"],
 });
 
-const body = Source_Sans_3({
+const body = Open_Sans({
   variable: "--font-body",
   subsets: ["latin"],
   weight: ["400", "600", "700"],
 });
 
 export const metadata: Metadata = {
-  title: "BW Konica — Client Templates",
+  title: "BW FrontEnd — Client Templates",
   description:
     "Provision Bitwarden client collections and clone admin templates into Software/Hardware.",
 };

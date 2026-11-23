@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AppFooter } from "@/components/AppFooter";
+import { BrandLogo } from "@/components/BrandLogo";
 
 export default function SetupPage() {
   const router = useRouter();
@@ -53,6 +55,7 @@ export default function SetupPage() {
     return (
       <div className="auth-stage">
         <p className="muted">Checking setup…</p>
+        <AppFooter />
       </div>
     );
   }
@@ -60,7 +63,11 @@ export default function SetupPage() {
   return (
     <div className="auth-stage">
       <div className="auth-panel">
-        <div className="auth-kicker">First load</div>
+        <div className="auth-brand">
+          <BrandLogo height={36} />
+          <div className="brand-sub">BW FrontEnd</div>
+        </div>
+        <p className="auth-kicker">First load</p>
         <h1 className="auth-title">Create admin</h1>
         <p className="auth-copy">
           This locks the system. After you create the admin account, setup is
@@ -108,6 +115,7 @@ export default function SetupPage() {
           </button>
         </form>
       </div>
+      <AppFooter />
     </div>
   );
 }

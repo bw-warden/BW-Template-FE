@@ -1,5 +1,9 @@
 import { z } from "zod";
 import {
+  CollectionAccessGrant,
+  CollectionAccessGrantSchema,
+} from "@/lib/collection-access";
+import {
   decryptSecret,
   encryptSecret,
   maskSecret,
@@ -19,10 +23,14 @@ export type BitwardenSettings = {
   vaultApiClientId: string;
   vaultApiClientSecret: string;
   vaultMasterPassword: string;
+  /** @deprecated Migrated into softwareAccess/hardwareAccess */
   operatorsGroupId: string;
+  /** @deprecated Unused; kept for backward-compatible settings blobs */
   adminsGroupId: string;
   clientsRootName: string;
   templatesRootName: string;
+  softwareAccess: CollectionAccessGrant[];
+  hardwareAccess: CollectionAccessGrant[];
 };
 
 export const SettingsUpdateSchema = z.object({
@@ -37,6 +45,8 @@ export const SettingsUpdateSchema = z.object({
   adminsGroupId: z.string().optional(),
   clientsRootName: z.string().optional(),
   templatesRootName: z.string().optional(),
+  softwareAccess: z.array(CollectionAccessGrantSchema).optional(),
+  hardwareAccess: z.array(CollectionAccessGrantSchema).optional(),
 });
 
 const DEFAULTS: BitwardenSettings = {
@@ -51,7 +61,34 @@ const DEFAULTS: BitwardenSettings = {
   adminsGroupId: "",
   clientsRootName: "Clients",
   templatesRootName: "Templates",
+  softwareAccess: [],
+  hardwareAccess: [],
 };
+
+function migrateAccessDefaults(settings: BitwardenSettings): BitwardenSettings {
+  const software = settings.softwareAccess ?? [];
+  const hardware = settings.hardwareAccess ?? [];
+  if (
+    settings.operatorsGroupId &&
+    software.length === 0 &&
+    hardware.length === 0
+  ) {
+    const grant: CollectionAccessGrant = {
+      groupId: settings.operatorsGroupId,
+      access: "edit",
+    };
+    return {
+      ...settings,
+      softwareAccess: [grant],
+      hardwareAccess: [grant],
+    };
+  }
+  return {
+    ...settings,
+    softwareAccess: software,
+    hardwareAccess: hardware,
+  };
+}
 
 export function getRegionUrls(region: "us" | "eu") {
   if (region === "eu") {
@@ -73,7 +110,8 @@ export function loadSettings(): BitwardenSettings | null {
   if (!enc) return null;
   try {
     const json = decryptSecret(enc);
-    return { ...DEFAULTS, ...JSON.parse(json) } as BitwardenSettings;
+    const parsed = { ...DEFAULTS, ...JSON.parse(json) } as BitwardenSettings;
+    return migrateAccessDefaults(parsed);
   } catch {
     return null;
   }
@@ -87,7 +125,7 @@ export function mergeSettingsUpdate(
   current: BitwardenSettings | null,
   update: z.infer<typeof SettingsUpdateSchema>,
 ): BitwardenSettings {
-  const base = current ?? { ...DEFAULTS };
+  const base = migrateAccessDefaults(current ?? { ...DEFAULTS });
   const next = { ...base };
 
   const assignIfPresent = <K extends keyof BitwardenSettings>(
@@ -116,6 +154,12 @@ export function mergeSettingsUpdate(
   if (update.templatesRootName) {
     next.templatesRootName = update.templatesRootName;
   }
+  if (update.softwareAccess !== undefined) {
+    next.softwareAccess = update.softwareAccess;
+  }
+  if (update.hardwareAccess !== undefined) {
+    next.hardwareAccess = update.hardwareAccess;
+  }
 
   return next;
 }
@@ -133,6 +177,8 @@ export type MaskedSettings = {
   adminsGroupId: string;
   clientsRootName: string;
   templatesRootName: string;
+  softwareAccess: CollectionAccessGrant[];
+  hardwareAccess: CollectionAccessGrant[];
 };
 
 export function toMaskedSettings(
@@ -152,8 +198,12 @@ export function toMaskedSettings(
       adminsGroupId: "",
       clientsRootName: "Clients",
       templatesRootName: "Templates",
+      softwareAccess: [],
+      hardwareAccess: [],
     };
   }
+
+  const migrated = migrateAccessDefaults(settings);
 
   return {
     configured: Boolean(
@@ -175,6 +225,8 @@ export function toMaskedSettings(
     adminsGroupId: settings.adminsGroupId,
     clientsRootName: settings.clientsRootName || "Clients",
     templatesRootName: settings.templatesRootName || "Templates",
+    softwareAccess: migrated.softwareAccess,
+    hardwareAccess: migrated.hardwareAccess,
   };
 }
 

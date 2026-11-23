@@ -11,27 +11,28 @@ export type ClientOption = {
 };
 
 type Props = {
-  clientsRoot: string;
+  clients: ClientOption[];
   value: ClientOption | null;
+  disabled?: boolean;
   onSelect: (client: ClientOption) => void;
-  onCreate: (name: string) => Promise<ClientOption>;
+  onCreate: (name: string) => void;
 };
 
-export function ClientTypeahead({
-  clientsRoot,
-  value,
-  onSelect,
-  onCreate,
-}: Props) {
+type Item =
+  | { kind: "client"; client: ClientOption }
+  | { kind: "create"; name: string };
+
+const MIN_QUERY = 2;
+
+export function ClientTypeahead({ clients, value, disabled, onSelect, onCreate }: Props) {
   const listId = useId();
   const [query, setQuery] = useState(value?.name ?? "");
-  const [options, setOptions] = useState<ClientOption[]>([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  const term = query.trim();
+  const canSearch = term.length >= MIN_QUERY;
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -41,99 +42,56 @@ export function ClientTypeahead({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const t = setTimeout(async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(
-          `/api/clients?q=${encodeURIComponent(query.trim())}`,
-        );
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Failed to load clients");
-        if (!cancelled) setOptions(data.clients || []);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-          setOptions([]);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }, 180);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [query]);
+  const matches = useMemo(() => {
+    if (!canSearch) return [];
+    const q = term.toLowerCase();
+    return clients.filter((c) => c.name.toLowerCase().includes(q));
+  }, [clients, term, canSearch]);
 
-  const exactMatch = useMemo(
-    () =>
-      options.some(
-        (o) => o.name.toLowerCase() === query.trim().toLowerCase(),
-      ),
-    [options, query],
-  );
+  const exactMatch = matches.some((c) => c.name.toLowerCase() === term.toLowerCase());
 
-  const items = useMemo(() => {
-    const list: Array<
-      | { kind: "client"; client: ClientOption }
-      | { kind: "create"; name: string }
-    > = options.map((client) => ({ kind: "client" as const, client }));
-    if (query.trim() && !exactMatch) {
-      list.unshift({ kind: "create", name: query.trim() });
-    }
+  const items = useMemo<Item[]>(() => {
+    if (!canSearch) return [];
+    const list: Item[] = matches.map((client) => ({ kind: "client", client }));
+    if (!exactMatch) list.push({ kind: "create", name: term });
     return list;
-  }, [options, query, exactMatch]);
+  }, [canSearch, matches, exactMatch, term]);
 
   useEffect(() => {
     setActive(0);
-  }, [items.length, query]);
+  }, [items.length, term]);
 
-  async function choose(index: number) {
+  function choose(index: number) {
     const item = items[index];
-    if (!item) return;
+    if (!item || disabled) return;
+    setOpen(false);
     if (item.kind === "client") {
-      onSelect(item.client);
       setQuery(item.client.name);
-      setOpen(false);
-      return;
-    }
-    setCreating(true);
-    setError(null);
-    try {
-      const created = await onCreate(item.name);
-      onSelect(created);
-      setQuery(created.name);
-      setOpen(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreating(false);
+      onSelect(item.client);
+    } else {
+      onCreate(item.name);
     }
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (!open && (e.key === "ArrowDown" || e.key === "Enter")) {
-      setOpen(true);
-      return;
-    }
-    if (e.key === "ArrowDown") {
+    if (disabled) return;
+    if (e.key === "Enter") {
       e.preventDefault();
+      if (open) choose(active);
+      else setOpen(true);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setOpen(true);
       setActive((i) => Math.min(i + 1, Math.max(items.length - 1, 0)));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActive((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      void choose(active);
     } else if (e.key === "Escape") {
       setOpen(false);
     }
   }
 
-  const previewName = value?.name || query.trim() || "ClientName";
+  const showList = open && !disabled && items.length > 0;
 
   return (
     <div className="typeahead" ref={wrapRef}>
@@ -143,33 +101,35 @@ export function ClientTypeahead({
           id="client-search"
           className="field"
           role="combobox"
-          aria-expanded={open}
+          aria-expanded={showList}
           aria-controls={listId}
           aria-autocomplete="list"
-          aria-activedescendant={open ? `${listId}-${active}` : undefined}
-          placeholder="Search or create a client…"
+          aria-activedescendant={showList ? `${listId}-${active}` : undefined}
+          placeholder="Type a client name to search…"
+          autoComplete="off"
+          autoFocus
           value={query}
-          disabled={creating}
+          disabled={disabled}
           onChange={(e) => {
             setQuery(e.target.value);
             setOpen(true);
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            if (canSearch) setOpen(true);
+          }}
           onKeyDown={onKeyDown}
         />
       </label>
 
-      {open && (
-        <div
-          className="typeahead-list"
-          role="listbox"
-          id={listId}
-          aria-label="Clients"
-        >
-          {loading && <div className="typeahead-option empty">Searching…</div>}
-          {!loading && items.length === 0 && (
-            <div className="typeahead-option empty">No clients found</div>
-          )}
+      {!canSearch && (
+        <div className="muted hint-line">
+          Type at least {MIN_QUERY} characters to search {clients.length} client
+          {clients.length === 1 ? "" : "s"}.
+        </div>
+      )}
+
+      {showList && (
+        <div className="typeahead-list" role="listbox" id={listId} aria-label="Clients">
           {items.map((item, index) =>
             item.kind === "create" ? (
               <button
@@ -181,9 +141,11 @@ export function ClientTypeahead({
                 className="typeahead-option create"
                 data-active={active === index ? "true" : "false"}
                 onMouseEnter={() => setActive(index)}
-                onClick={() => void choose(index)}
+                onClick={() => choose(index)}
               >
-                Create new client “{item.name}”
+                {matches.length === 0
+                  ? `No client named “${item.name}”. Create new client`
+                  : `Create new client “${item.name}”`}
               </button>
             ) : (
               <button
@@ -195,20 +157,14 @@ export function ClientTypeahead({
                 className="typeahead-option"
                 data-active={active === index ? "true" : "false"}
                 onMouseEnter={() => setActive(index)}
-                onClick={() => void choose(index)}
+                onClick={() => choose(index)}
               >
                 {item.client.name}
-                <div className="muted">{item.client.path}</div>
               </button>
             ),
           )}
         </div>
       )}
-
-      <div className="path-preview" aria-live="polite">
-        {clientsRoot} / {previewName} / Software · Hardware
-      </div>
-      {error && <div className="banner banner-error" style={{ marginTop: 12 }}>{error}</div>}
     </div>
   );
 }

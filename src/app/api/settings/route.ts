@@ -1,4 +1,4 @@
-import { jsonError, jsonOk, withAuth } from "@/lib/api";
+import { jsonError, jsonOk, withAdmin } from "@/lib/api";
 import {
   loadSettings,
   mergeSettingsUpdate,
@@ -10,13 +10,13 @@ import {
 export const runtime = "nodejs";
 
 export async function GET() {
-  return withAuth(async () => {
+  return withAdmin(async () => {
     return jsonOk(toMaskedSettings(loadSettings()));
   });
 }
 
 export async function PUT(request: Request) {
-  return withAuth(async () => {
+  return withAdmin(async () => {
     let body: unknown;
     try {
       body = await request.json();

@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  CollectionAccessEditor,
+  type GroupOption,
+} from "@/components/CollectionAccessEditor";
+import type { CollectionAccessGrant } from "@/lib/collection-access";
 
 type Masked = {
   configured: boolean;
@@ -11,10 +16,10 @@ type Masked = {
   vaultApiClientId: string;
   vaultApiClientSecret: { configured: boolean; last4: string | null };
   vaultMasterPassword: { configured: boolean; last4: string | null };
-  operatorsGroupId: string;
-  adminsGroupId: string;
   clientsRootName: string;
   templatesRootName: string;
+  softwareAccess: CollectionAccessGrant[];
+  hardwareAccess: CollectionAccessGrant[];
 };
 
 type FormState = {
@@ -25,10 +30,10 @@ type FormState = {
   vaultApiClientId: string;
   vaultApiClientSecret: string;
   vaultMasterPassword: string;
-  operatorsGroupId: string;
-  adminsGroupId: string;
   clientsRootName: string;
   templatesRootName: string;
+  softwareAccess: CollectionAccessGrant[];
+  hardwareAccess: CollectionAccessGrant[];
 };
 
 const emptyForm: FormState = {
@@ -39,18 +44,30 @@ const emptyForm: FormState = {
   vaultApiClientId: "",
   vaultApiClientSecret: "",
   vaultMasterPassword: "",
-  operatorsGroupId: "",
-  adminsGroupId: "",
   clientsRootName: "Clients",
   templatesRootName: "Templates",
+  softwareAccess: [],
+  hardwareAccess: [],
 };
+
+function formatSyncedAt(iso: string | null) {
+  if (!iso) return "Never synced";
+  try {
+    return `Last synced ${new Date(iso).toLocaleString()}`;
+  } catch {
+    return `Last synced ${iso}`;
+  }
+}
 
 export function SettingsForm() {
   const [masked, setMasked] = useState<Masked | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [groups, setGroups] = useState<GroupOption[]>([]);
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [refreshingGroups, setRefreshingGroups] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -58,6 +75,19 @@ export function SettingsForm() {
   useEffect(() => {
     void load();
   }, []);
+
+  async function loadGroups() {
+    const res = await fetch("/api/groups");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load groups");
+    setGroups(
+      (data.groups || []).map((g: { id: string; name: string }) => ({
+        id: g.id,
+        name: g.name,
+      })),
+    );
+    setSyncedAt(data.syncedAt || null);
+  }
 
   async function load() {
     setLoading(true);
@@ -75,10 +105,14 @@ export function SettingsForm() {
         vaultApiClientId: data.vaultApiClientId || "",
         vaultApiClientSecret: "",
         vaultMasterPassword: "",
-        operatorsGroupId: data.operatorsGroupId || "",
-        adminsGroupId: data.adminsGroupId || "",
         clientsRootName: data.clientsRootName || "Clients",
         templatesRootName: data.templatesRootName || "Templates",
+        softwareAccess: data.softwareAccess || [],
+        hardwareAccess: data.hardwareAccess || [],
+      });
+      await loadGroups().catch(() => {
+        setGroups([]);
+        setSyncedAt(null);
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -91,20 +125,43 @@ export function SettingsForm() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  async function refreshGroups() {
+    setRefreshingGroups(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/groups/refresh", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to refresh groups");
+      setGroups(
+        (data.groups || []).map((g: { id: string; name: string }) => ({
+          id: g.id,
+          name: g.name,
+        })),
+      );
+      setSyncedAt(data.syncedAt || null);
+      setMessage(`Loaded ${data.groups?.length ?? 0} groups from Bitwarden.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRefreshingGroups(false);
+    }
+  }
+
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     setMessage(null);
     setError(null);
     try {
-      const payload: Record<string, string> = {
+      const payload: Record<string, unknown> = {
         region: form.region,
         orgId: form.orgId,
         orgApiClientId: form.orgApiClientId,
-        operatorsGroupId: form.operatorsGroupId,
-        adminsGroupId: form.adminsGroupId,
         clientsRootName: form.clientsRootName,
         templatesRootName: form.templatesRootName,
+        softwareAccess: form.softwareAccess,
+        hardwareAccess: form.hardwareAccess,
       };
       if (form.orgApiClientSecret.trim()) {
         payload.orgApiClientSecret = form.orgApiClientSecret.trim();
@@ -133,6 +190,8 @@ export function SettingsForm() {
         vaultApiClientSecret: "",
         vaultMasterPassword: "",
         vaultApiClientId: data.vaultApiClientId || prev.vaultApiClientId,
+        softwareAccess: data.softwareAccess || prev.softwareAccess,
+        hardwareAccess: data.hardwareAccess || prev.hardwareAccess,
       }));
       setMessage("Settings saved. Secrets remain encrypted server-side.");
     } catch (err) {
@@ -283,26 +342,47 @@ export function SettingsForm() {
       </div>
 
       <div className="panel">
-        <h2 className="panel-title">Groups & roots</h2>
+        <div className="panel-head">
+          <h2 className="panel-title">Default collection access</h2>
+          <div className="btn-row">
+            <span className="muted">{formatSyncedAt(syncedAt)}</span>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={refreshingGroups}
+              onClick={() => void refreshGroups()}
+            >
+              {refreshingGroups ? "Refreshing…" : "Refresh groups"}
+            </button>
+          </div>
+        </div>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Bitwarden collection permissions (Can view / Can view, except
+          passwords / Can edit / Can manage). Applied when a new client&apos;s
+          Software or Hardware collection is created. Existing clients are
+          managed on the Clients tab.
+        </p>
+        <div className="access-editors">
+          <CollectionAccessEditor
+            title="Software"
+            grants={form.softwareAccess}
+            groups={groups}
+            disabled={saving}
+            onChange={(softwareAccess) => setField("softwareAccess", softwareAccess)}
+          />
+          <CollectionAccessEditor
+            title="Hardware"
+            grants={form.hardwareAccess}
+            groups={groups}
+            disabled={saving}
+            onChange={(hardwareAccess) => setField("hardwareAccess", hardwareAccess)}
+          />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2 className="panel-title">Collection roots</h2>
         <div className="settings-grid two">
-          <label className="label">
-            Operators group ID
-            <input
-              className="field"
-              value={form.operatorsGroupId}
-              onChange={(e) => setField("operatorsGroupId", e.target.value)}
-              placeholder="Optional — Edit items only on Software/Hardware"
-            />
-          </label>
-          <label className="label">
-            Admins group ID
-            <input
-              className="field"
-              value={form.adminsGroupId}
-              onChange={(e) => setField("adminsGroupId", e.target.value)}
-              placeholder="Optional"
-            />
-          </label>
           <label className="label">
             Clients root name
             <input

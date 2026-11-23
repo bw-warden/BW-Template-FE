@@ -1,4 +1,12 @@
 import {
+  createOrgCollection,
+  listOrgCollections,
+} from "@/lib/bitwarden/vault";
+import {
+  CollectionAccessGrant,
+  toBwGroupAccess,
+} from "@/lib/collection-access";
+import {
   BitwardenSettings,
   getRegionUrls,
 } from "@/lib/settings";
@@ -13,6 +21,12 @@ export type BwCollection = {
     hidePasswords: boolean;
     manage: boolean;
   }>;
+};
+
+export type BwGroup = {
+  id: string;
+  name: string;
+  externalId?: string | null;
 };
 
 type TokenCache = { token: string; expiresAt: number };
@@ -72,21 +86,110 @@ async function apiFetch<T>(
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Bitwarden Public API ${path} failed (${res.status}): ${text}`);
+    const text = (await res.text()).trim();
+    throw new Error(
+      text
+        ? `Bitwarden Public API ${path} failed (${res.status}): ${text}`
+        : `Bitwarden Public API ${path} failed (${res.status})`,
+    );
   }
 
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
+type CollectionListResponse = {
+  data?: BwCollection[];
+  continuationToken?: string | null;
+};
+
+/**
+ * Public API list. Collection names are encrypted and are not in this payload.
+ * Includes group access arrays used for the Clients admin tab.
+ */
+export async function listPublicCollections(
+  settings: BitwardenSettings,
+): Promise<BwCollection[]> {
+  const all: BwCollection[] = [];
+  const seen = new Set<string>();
+  let token: string | null | undefined;
+
+  do {
+    const path = token
+      ? `/public/collections?continuationToken=${encodeURIComponent(token)}`
+      : "/public/collections";
+    const data = await apiFetch<CollectionListResponse | BwCollection[]>(
+      settings,
+      path,
+    );
+    if (Array.isArray(data)) return data;
+    all.push(...(data.data ?? []));
+    const next = data.continuationToken || null;
+    if (!next || seen.has(next) || seen.size >= 40) break;
+    seen.add(next);
+    token = next;
+  } while (token);
+
+  return all;
+}
+
+type GroupListResponse = {
+  data?: Array<{
+    id?: string;
+    name?: string;
+    externalId?: string | null;
+  }>;
+  continuationToken?: string | null;
+};
+
+/** Organization groups via Public API (names are plaintext). */
+export async function listGroups(
+  settings: BitwardenSettings,
+): Promise<BwGroup[]> {
+  const all: BwGroup[] = [];
+  const seen = new Set<string>();
+  let token: string | null | undefined;
+
+  do {
+    const path = token
+      ? `/public/groups?continuationToken=${encodeURIComponent(token)}`
+      : "/public/groups";
+    const data = await apiFetch<GroupListResponse | BwGroup[]>(settings, path);
+    if (Array.isArray(data)) {
+      return data
+        .filter((g) => g?.id && g.name)
+        .map((g) => ({
+          id: g.id,
+          name: g.name,
+          externalId: g.externalId ?? null,
+        }));
+    }
+    for (const g of data.data ?? []) {
+      if (!g?.id || !g.name) continue;
+      all.push({
+        id: g.id,
+        name: g.name,
+        externalId: g.externalId ?? null,
+      });
+    }
+    const next = data.continuationToken || null;
+    if (!next || seen.has(next) || seen.size >= 40) break;
+    seen.add(next);
+    token = next;
+  } while (token);
+
+  return all.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function testOrgConnection(
   settings: BitwardenSettings,
 ): Promise<{ ok: boolean; message: string }> {
   try {
-    await getOrgToken(settings);
-    await listCollections(settings);
-    return { ok: true, message: "Organization API token and collections list OK" };
+    const collections = await listPublicCollections(settings);
+    return {
+      ok: true,
+      message: `Organization API token and collections list OK (${collections.length} collections)`,
+    };
   } catch (err) {
     return {
       ok: false,
@@ -95,15 +198,17 @@ export async function testOrgConnection(
   }
 }
 
+/** Named collections via the unlocked service account. Public API omits names. */
 export async function listCollections(
   settings: BitwardenSettings,
+  opts: { fresh?: boolean } = {},
 ): Promise<BwCollection[]> {
-  const data = await apiFetch<{ data?: BwCollection[] } | BwCollection[]>(
-    settings,
-    "/public/organization/collections",
-  );
-  if (Array.isArray(data)) return data;
-  return data.data ?? [];
+  const rows = await listOrgCollections(settings, opts);
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    externalId: row.externalId ?? null,
+  }));
 }
 
 export async function createCollection(
@@ -111,14 +216,17 @@ export async function createCollection(
   name: string,
   groups: BwCollection["groups"] = [],
 ): Promise<BwCollection> {
-  return apiFetch<BwCollection>(settings, "/public/organization/collections", {
-    method: "POST",
-    body: JSON.stringify({
-      name,
-      externalId: null,
-      groups: groups ?? [],
-    }),
-  });
+  const access = groups ?? [];
+  const created = await createOrgCollection(settings, name, access);
+  if (access.length) {
+    await updateCollectionAccess(settings, created.id, name, access);
+  }
+  return {
+    id: created.id,
+    name: created.name || name,
+    externalId: created.externalId ?? null,
+    groups: access,
+  };
 }
 
 export async function updateCollectionAccess(
@@ -127,7 +235,7 @@ export async function updateCollectionAccess(
   name: string,
   groups: NonNullable<BwCollection["groups"]>,
 ): Promise<void> {
-  await apiFetch(settings, `/public/organization/collections/${collectionId}`, {
+  await apiFetch(settings, `/public/collections/${collectionId}`, {
     method: "PUT",
     body: JSON.stringify({
       name,
@@ -144,20 +252,6 @@ export function findCollectionByName(
 ): BwCollection | undefined {
   const norm = name.trim().toLowerCase();
   return collections.find((c) => c.name.trim().toLowerCase() === norm);
-}
-
-export function operatorsEditGroup(
-  operatorsGroupId: string | undefined,
-): NonNullable<BwCollection["groups"]> {
-  if (!operatorsGroupId) return [];
-  return [
-    {
-      id: operatorsGroupId,
-      readOnly: false,
-      hidePasswords: false,
-      manage: false, // Edit items only — never Manage
-    },
-  ];
 }
 
 export async function ensureRootCollection(
@@ -209,7 +303,31 @@ export function listClientNodes(
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function provisionClient(
+export async function findClientNode(
+  settings: BitwardenSettings,
+  clientId: string,
+): Promise<ClientNode | null> {
+  const collections = await listCollections(settings);
+  const clients = listClientNodes(collections, settings.clientsRootName || "Clients");
+  return clients.find((c) => c.id === clientId) ?? null;
+}
+
+let provisionQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * One provision at a time. Concurrent requests for the same client would each
+ * see a list missing the other's new collections and create duplicates.
+ */
+export function provisionClient(
+  settings: BitwardenSettings,
+  clientName: string,
+): Promise<ClientNode> {
+  const run = provisionQueue.then(() => provisionClientNow(settings, clientName));
+  provisionQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function provisionClientNow(
   settings: BitwardenSettings,
   clientName: string,
 ): Promise<ClientNode> {
@@ -220,33 +338,36 @@ export async function provisionClient(
   }
 
   const root = settings.clientsRootName || "Clients";
-  await ensureRootCollection(settings, root);
+  const collections = await listCollections(settings, { fresh: true });
+  if (!findCollectionByName(collections, root)) {
+    await createCollection(settings, root, []);
+  }
 
-  let collections = await listCollections(settings);
   const clientPath = `${root}/${name}`;
   const softwarePath = `${clientPath}/Software`;
   const hardwarePath = `${clientPath}/Hardware`;
-  const editGroups = operatorsEditGroup(settings.operatorsGroupId || undefined);
+  const softwareGroups = toBwGroupAccess(
+    (settings.softwareAccess ?? []) as CollectionAccessGrant[],
+  );
+  const hardwareGroups = toBwGroupAccess(
+    (settings.hardwareAccess ?? []) as CollectionAccessGrant[],
+  );
 
   let client = findCollectionByName(collections, clientPath);
   if (!client) {
     client = await createCollection(settings, clientPath, []);
   }
 
-  collections = await listCollections(settings);
+  // Apply defaults only when creating nested collections — existing
+  // Software/Hardware access is owned by the Clients admin tab.
   let software = findCollectionByName(collections, softwarePath);
   if (!software) {
-    software = await createCollection(settings, softwarePath, editGroups);
-  } else if (editGroups.length) {
-    await updateCollectionAccess(settings, software.id, softwarePath, editGroups);
+    software = await createCollection(settings, softwarePath, softwareGroups);
   }
 
-  collections = await listCollections(settings);
   let hardware = findCollectionByName(collections, hardwarePath);
   if (!hardware) {
-    hardware = await createCollection(settings, hardwarePath, editGroups);
-  } else if (editGroups.length) {
-    await updateCollectionAccess(settings, hardware.id, hardwarePath, editGroups);
+    hardware = await createCollection(settings, hardwarePath, hardwareGroups);
   }
 
   return {

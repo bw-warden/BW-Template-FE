@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+import { AppUser, getCurrentUser } from "@/lib/session";
 
 export function jsonOk<T>(data: T, init?: ResponseInit) {
   return NextResponse.json(data, init);
@@ -10,13 +10,24 @@ export function jsonError(message: string, status = 400) {
 }
 
 export async function withAuth<T>(
-  handler: (session: NonNullable<
-    Awaited<ReturnType<typeof requireSession>>
-  >) => Promise<T>,
+  handler: (user: AppUser) => Promise<T>,
 ): Promise<T | NextResponse> {
-  const session = await requireSession();
-  if (!session) {
+  const user = await getCurrentUser();
+  if (!user) {
     return jsonError("Unauthorized", 401);
   }
-  return handler(session);
+  return handler(user);
+}
+
+export async function withAdmin<T>(
+  handler: (user: AppUser) => Promise<T>,
+): Promise<T | NextResponse> {
+  const user = await getCurrentUser();
+  if (!user) {
+    return jsonError("Unauthorized", 401);
+  }
+  if (user.role !== "admin") {
+    return jsonError("Admin access required", 403);
+  }
+  return handler(user);
 }

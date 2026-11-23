@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AppFooter } from "@/components/AppFooter";
+import { BrandLogo } from "@/components/BrandLogo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -52,6 +54,7 @@ export default function LoginPage() {
     return (
       <div className="auth-stage">
         <p className="muted">Loading…</p>
+        <AppFooter />
       </div>
     );
   }
@@ -59,12 +62,11 @@ export default function LoginPage() {
   return (
     <div className="auth-stage">
       <div className="auth-panel">
-        <div className="auth-kicker">BW Konica</div>
+        <div className="auth-brand">
+          <BrandLogo height={36} />
+          <div className="brand-sub">BW FrontEnd</div>
+        </div>
         <h1 className="auth-title">Sign in</h1>
-        <p className="auth-copy">
-          Local admin login for this test provisioner. Bitwarden credentials stay
-          server-side.
-        </p>
         <form className="stack" onSubmit={onSubmit}>
           {error && <div className="banner banner-error">{error}</div>}
           <label className="label">
@@ -94,6 +96,7 @@ export default function LoginPage() {
           </button>
         </form>
       </div>
+      <AppFooter />
     </div>
   );
 }
