@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { jsonError, jsonOk, jsonServerError, withAdmin } from "@/lib/api";
 import {
+  findClientFolder,
   findClientNode,
   updateCollectionAccess,
 } from "@/lib/bitwarden/public-api";
@@ -13,8 +14,12 @@ import { loadSettings, settingsReady } from "@/lib/settings";
 export const runtime = "nodejs";
 
 const UpdateSchema = z.object({
-  software: z.array(CollectionAccessGrantSchema),
-  hardware: z.array(CollectionAccessGrantSchema),
+  folders: z.array(
+    z.object({
+      name: z.string().trim().min(1),
+      access: z.array(CollectionAccessGrantSchema),
+    }),
+  ),
 });
 
 export async function PUT(
@@ -46,36 +51,39 @@ export async function PUT(
       const client = await findClientNode(settings!, id);
       if (!client) return jsonError("Client not found", 404);
 
-      if (!client.softwareId && !client.hardwareId) {
-        return jsonError("Software and Hardware Shared Folders are missing", 400);
-      }
-      if (!client.softwareId) {
-        return jsonError("Software Shared Folder is missing for this client", 400);
-      }
-      if (!client.hardwareId) {
-        return jsonError("Hardware Shared Folder is missing for this client", 400);
+      if (client.folders.length === 0) {
+        return jsonError("No nested Shared Folders found for this client", 400);
       }
 
-      await Promise.all([
-        updateCollectionAccess(
-          settings!,
-          client.softwareId,
-          `${client.path}/Software`,
-          toBwGroupAccess(parsed.data.software),
-        ),
-        updateCollectionAccess(
-          settings!,
-          client.hardwareId,
-          `${client.path}/Hardware`,
-          toBwGroupAccess(parsed.data.hardware),
-        ),
-      ]);
+      const missing: string[] = [];
+      for (const entry of parsed.data.folders) {
+        if (!findClientFolder(client, entry.name)) {
+          missing.push(entry.name);
+        }
+      }
+      if (missing.length > 0) {
+        return jsonError(
+          `Shared Folder${missing.length === 1 ? "" : "s"} missing: ${missing.join(", ")}`,
+          400,
+        );
+      }
+
+      await Promise.all(
+        parsed.data.folders.map((entry) => {
+          const folder = findClientFolder(client, entry.name)!;
+          return updateCollectionAccess(
+            settings!,
+            folder.id,
+            `${client.path}/${folder.name}`,
+            toBwGroupAccess(entry.access),
+          );
+        }),
+      );
 
       return jsonOk({
         ok: true,
         clientId: client.id,
-        software: parsed.data.software,
-        hardware: parsed.data.hardware,
+        folders: parsed.data.folders,
       });
     } catch (err) {
       return jsonServerError(err);

@@ -1149,12 +1149,36 @@ select.field.field-compact {
 .access-editors {
   display: grid;
   gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
 }
 
-@media (min-width: 900px) {
-  .access-editors {
-    grid-template-columns: 1fr 1fr;
-  }
+.default-folder-card {
+  min-width: 0;
+}
+
+.default-folder-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.default-folder-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.default-folder-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 1rem;
+}
+
+.default-folder-add .field {
+  flex: 1;
+  min-width: 12rem;
 }
 
 .access-editor {

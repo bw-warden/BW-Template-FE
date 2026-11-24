@@ -15,6 +15,37 @@ import {
 
 export const RegionSchema = z.enum(["us", "eu"]);
 
+export const DefaultSharedFolderSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Folder name is required")
+    .max(120)
+    .refine((v) => !v.includes("/"), {
+      message: "Folder name cannot contain '/'",
+    }),
+  access: z.array(CollectionAccessGrantSchema),
+});
+
+export type DefaultSharedFolder = z.infer<typeof DefaultSharedFolderSchema>;
+
+export const DefaultFoldersSchema = z
+  .array(DefaultSharedFolderSchema)
+  .superRefine((folders, ctx) => {
+    const seen = new Set<string>();
+    for (let i = 0; i < folders.length; i++) {
+      const key = folders[i].name.trim().toLowerCase();
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate default folder name: ${folders[i].name}`,
+          path: [i, "name"],
+        });
+      }
+      seen.add(key);
+    }
+  });
+
 export type BitwardenSettings = {
   region: "us" | "eu";
   orgId: string;
@@ -23,14 +54,17 @@ export type BitwardenSettings = {
   vaultApiClientId: string;
   vaultApiClientSecret: string;
   vaultMasterPassword: string;
-  /** @deprecated Migrated into softwareAccess/hardwareAccess */
+  /** @deprecated Migrated into defaultFolders */
   operatorsGroupId: string;
   /** @deprecated Unused; kept for backward-compatible settings blobs */
   adminsGroupId: string;
   clientsRootName: string;
   templatesRootName: string;
+  /** @deprecated Migrated into defaultFolders */
   softwareAccess: CollectionAccessGrant[];
+  /** @deprecated Migrated into defaultFolders */
   hardwareAccess: CollectionAccessGrant[];
+  defaultFolders: DefaultSharedFolder[];
 };
 
 export const SettingsUpdateSchema = z.object({
@@ -47,7 +81,13 @@ export const SettingsUpdateSchema = z.object({
   templatesRootName: z.string().optional(),
   softwareAccess: z.array(CollectionAccessGrantSchema).optional(),
   hardwareAccess: z.array(CollectionAccessGrantSchema).optional(),
+  defaultFolders: DefaultFoldersSchema.optional(),
 });
+
+const EMPTY_DEFAULT_FOLDERS: DefaultSharedFolder[] = [
+  { name: "Software", access: [] },
+  { name: "Hardware", access: [] },
+];
 
 const DEFAULTS: BitwardenSettings = {
   region: "us",
@@ -63,30 +103,43 @@ const DEFAULTS: BitwardenSettings = {
   templatesRootName: "Templates",
   softwareAccess: [],
   hardwareAccess: [],
+  defaultFolders: [...EMPTY_DEFAULT_FOLDERS],
 };
 
 function migrateAccessDefaults(settings: BitwardenSettings): BitwardenSettings {
   const software = settings.softwareAccess ?? [];
   const hardware = settings.hardwareAccess ?? [];
+  let defaultFolders = settings.defaultFolders ?? [];
+
+  // Legacy operatorsGroupId → Software/Hardware grants when nothing else set.
+  let nextSoftware = software;
+  let nextHardware = hardware;
   if (
     settings.operatorsGroupId &&
     software.length === 0 &&
-    hardware.length === 0
+    hardware.length === 0 &&
+    defaultFolders.length === 0
   ) {
     const grant: CollectionAccessGrant = {
       groupId: settings.operatorsGroupId,
       access: "edit",
     };
-    return {
-      ...settings,
-      softwareAccess: [grant],
-      hardwareAccess: [grant],
-    };
+    nextSoftware = [grant];
+    nextHardware = [grant];
   }
+
+  if (defaultFolders.length === 0) {
+    defaultFolders = [
+      { name: "Software", access: nextSoftware },
+      { name: "Hardware", access: nextHardware },
+    ];
+  }
+
   return {
     ...settings,
-    softwareAccess: software,
-    hardwareAccess: hardware,
+    softwareAccess: [],
+    hardwareAccess: [],
+    defaultFolders,
   };
 }
 
@@ -118,7 +171,12 @@ export async function loadSettings(): Promise<BitwardenSettings | null> {
 }
 
 export async function saveSettings(settings: BitwardenSettings): Promise<void> {
-  await upsertSettingsPayloadEnc(encryptSecret(JSON.stringify(settings)));
+  const toStore = migrateAccessDefaults({
+    ...settings,
+    softwareAccess: [],
+    hardwareAccess: [],
+  });
+  await upsertSettingsPayloadEnc(encryptSecret(JSON.stringify(toStore)));
 }
 
 export function mergeSettingsUpdate(
@@ -154,12 +212,45 @@ export function mergeSettingsUpdate(
   if (update.templatesRootName) {
     next.templatesRootName = update.templatesRootName;
   }
-  if (update.softwareAccess !== undefined) {
-    next.softwareAccess = update.softwareAccess;
+  if (update.defaultFolders !== undefined) {
+    next.defaultFolders = update.defaultFolders;
+  } else if (
+    update.softwareAccess !== undefined ||
+    update.hardwareAccess !== undefined
+  ) {
+    // Legacy payload: fold into defaultFolders Software/Hardware entries.
+    const folders = [...next.defaultFolders];
+    const softIdx = folders.findIndex(
+      (f) => f.name.toLowerCase() === "software",
+    );
+    const hardIdx = folders.findIndex(
+      (f) => f.name.toLowerCase() === "hardware",
+    );
+    if (update.softwareAccess !== undefined) {
+      if (softIdx >= 0) {
+        folders[softIdx] = {
+          ...folders[softIdx],
+          access: update.softwareAccess,
+        };
+      } else {
+        folders.push({ name: "Software", access: update.softwareAccess });
+      }
+    }
+    if (update.hardwareAccess !== undefined) {
+      if (hardIdx >= 0) {
+        folders[hardIdx] = {
+          ...folders[hardIdx],
+          access: update.hardwareAccess,
+        };
+      } else {
+        folders.push({ name: "Hardware", access: update.hardwareAccess });
+      }
+    }
+    next.defaultFolders = folders;
   }
-  if (update.hardwareAccess !== undefined) {
-    next.hardwareAccess = update.hardwareAccess;
-  }
+
+  next.softwareAccess = [];
+  next.hardwareAccess = [];
 
   return next;
 }
@@ -177,8 +268,7 @@ export type MaskedSettings = {
   adminsGroupId: string;
   clientsRootName: string;
   templatesRootName: string;
-  softwareAccess: CollectionAccessGrant[];
-  hardwareAccess: CollectionAccessGrant[];
+  defaultFolders: DefaultSharedFolder[];
 };
 
 export function toMaskedSettings(
@@ -198,8 +288,7 @@ export function toMaskedSettings(
       adminsGroupId: "",
       clientsRootName: "Clients",
       templatesRootName: "Templates",
-      softwareAccess: [],
-      hardwareAccess: [],
+      defaultFolders: [...EMPTY_DEFAULT_FOLDERS],
     };
   }
 
@@ -225,8 +314,7 @@ export function toMaskedSettings(
     adminsGroupId: settings.adminsGroupId,
     clientsRootName: settings.clientsRootName || "Clients",
     templatesRootName: settings.templatesRootName || "Templates",
-    softwareAccess: migrated.softwareAccess,
-    hardwareAccess: migrated.hardwareAccess,
+    defaultFolders: migrated.defaultFolders,
   };
 }
 

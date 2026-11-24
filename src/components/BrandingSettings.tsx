@@ -100,14 +100,24 @@ export function BrandingSettings() {
           ) : (
             <p className="muted">No custom logo uploaded. Text brand is shown.</p>
           )}
-          <div className="row gap">
+          <div className="btn-row">
             <input
               ref={inputRef}
               type="file"
               accept="image/png,image/jpeg,image/webp"
+              className="sr-only"
+              tabIndex={-1}
               disabled={busy}
               onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
             />
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy}
+              onClick={() => inputRef.current?.click()}
+            >
+              {busy ? "Uploading…" : "Choose file"}
+            </button>
             {hasLogo && (
               <button
                 type="button"
@@ -115,7 +125,7 @@ export function BrandingSettings() {
                 disabled={busy}
                 onClick={() => void onRemove()}
               >
-                {busy ? "Working…" : "Remove logo"}
+                Remove logo
               </button>
             )}
           </div>

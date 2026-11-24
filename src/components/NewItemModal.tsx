@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ProgressBar } from "@/components/ProgressBar";
 
-export type Target = "software" | "hardware";
+/** Shared Folder leaf name under the client (e.g. Software). */
+export type Target = string;
 
 type Field = { name: string; value: string; type: number; required?: boolean };
 
@@ -21,14 +22,10 @@ type Props = {
   templateName: string;
   clientId: string;
   clientName: string;
+  folderNames: string[];
   defaultTarget: Target;
   onClose: () => void;
   onSaved: (result: { target: Target; count: number; name: string }) => void;
-};
-
-const TARGET_LABEL: Record<Target, string> = {
-  software: "Software",
-  hardware: "Hardware",
 };
 
 export function NewItemModal({
@@ -36,6 +33,7 @@ export function NewItemModal({
   templateName,
   clientId,
   clientName,
+  folderNames,
   defaultTarget,
   onClose,
   onSaved,
@@ -45,8 +43,18 @@ export function NewItemModal({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [target, setTarget] = useState<Target>(defaultTarget);
+  const [target, setTarget] = useState<Target>(
+    defaultTarget || folderNames[0] || "",
+  );
   const [name, setName] = useState(templateName);
+
+  useEffect(() => {
+    const next =
+      (defaultTarget && folderNames.includes(defaultTarget)
+        ? defaultTarget
+        : folderNames[0]) || "";
+    setTarget(next);
+  }, [defaultTarget, folderNames]);
   const [notes, setNotes] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -197,24 +205,30 @@ export function NewItemModal({
             <fieldset className="modal-fields stack" disabled={saving}>
               <fieldset className="modal-section">
                 <legend className="modal-section-title">Shared Folder</legend>
-                <div className="target-toggle">
-                  {(["software", "hardware"] as const).map((t) => (
-                    <label
-                      key={t}
-                      className="target-option"
-                      data-selected={target === t ? "true" : "false"}
-                    >
-                      <input
-                        type="radio"
-                        name="target"
-                        className="sr-only"
-                        checked={target === t}
-                        onChange={() => setTarget(t)}
-                      />
-                      <strong>{TARGET_LABEL[t]}</strong>
-                    </label>
-                  ))}
-                </div>
+                {folderNames.length === 0 ? (
+                  <p className="banner banner-warn">
+                    This client has no nested Shared Folders.
+                  </p>
+                ) : (
+                  <div className="target-toggle">
+                    {folderNames.map((t) => (
+                      <label
+                        key={t}
+                        className="target-option"
+                        data-selected={target === t ? "true" : "false"}
+                      >
+                        <input
+                          type="radio"
+                          name="target"
+                          className="sr-only"
+                          checked={target === t}
+                          onChange={() => setTarget(t)}
+                        />
+                        <strong>{t}</strong>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </fieldset>
 
               <fieldset className="modal-section">
@@ -417,7 +431,7 @@ export function NewItemModal({
               <div className="modal-status">
                 {saving && (
                   <ProgressBar
-                    label={`Saving “${name}” to ${clientName} / ${TARGET_LABEL[target]}…`}
+                    label={`Saving “${name}” to ${clientName} / ${target}…`}
                     expectedMs={7000}
                     stages={[
                       "Reading template",
@@ -432,8 +446,12 @@ export function NewItemModal({
             )}
 
             <div className="modal-footer">
-              <button type="submit" className="btn btn-primary" disabled={saving}>
-                {saving ? "Saving…" : `Save to ${TARGET_LABEL[target]}`}
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={saving || !target || folderNames.length === 0}
+              >
+                {saving ? "Saving…" : `Save to ${target || "folder"}`}
               </button>
               <button
                 type="button"

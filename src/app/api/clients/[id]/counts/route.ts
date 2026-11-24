@@ -20,11 +20,18 @@ export async function GET(
       if (fresh) await syncNow(settings!);
       const client = await findClientNode(settings!, id);
       if (!client) return jsonError("Client not found", 404);
-      const [software, hardware] = await Promise.all([
-        client.softwareId ? countItemsInCollection(settings!, client.softwareId) : 0,
-        client.hardwareId ? countItemsInCollection(settings!, client.hardwareId) : 0,
-      ]);
-      return jsonOk({ software, hardware });
+
+      const entries = await Promise.all(
+        client.folders.map(async (folder) => {
+          const count = await countItemsInCollection(settings!, folder.id);
+          return [folder.name, count] as const;
+        }),
+      );
+      const counts: Record<string, number> = {};
+      for (const [name, count] of entries) {
+        counts[name] = count;
+      }
+      return jsonOk({ counts });
     } catch (err) {
       return jsonServerError(err);
     }

@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { jsonError, jsonOk, jsonServerError, withAuth } from "@/lib/api";
-import { findClientNode } from "@/lib/bitwarden/public-api";
+import {
+  findClientFolder,
+  findClientNode,
+} from "@/lib/bitwarden/public-api";
 import {
   countItemsInCollection,
   createItemFromTemplate,
@@ -19,7 +22,7 @@ const FieldSchema = z.object({
 
 const CreateItemSchema = z.object({
   clientId: z.string().min(1),
-  target: z.enum(["software", "hardware"]),
+  target: z.string().trim().min(1).max(120),
   templateId: z.string().min(1),
   item: z.object({
     name: z.string().trim().min(1, "Item name is required").max(500),
@@ -55,11 +58,10 @@ export async function POST(request: Request) {
       const client = await findClientNode(settings, parsed.data.clientId);
       if (!client) return jsonError("Client not found", 404);
 
-      const targetId =
-        parsed.data.target === "software" ? client.softwareId : client.hardwareId;
-      if (!targetId) {
+      const folder = findClientFolder(client, parsed.data.target);
+      if (!folder) {
         return jsonError(
-          `${parsed.data.target} Shared Folder missing for this client. Re-create the client to repair it.`,
+          `Shared Folder “${parsed.data.target}” missing for this client. Re-create the client to repair it.`,
           400,
         );
       }
@@ -68,14 +70,14 @@ export async function POST(request: Request) {
         settings,
         templatesId,
         parsed.data.templateId,
-        targetId,
+        folder.id,
         {
           ...parsed.data.item,
           fields: parsed.data.item.fields as VaultField[] | undefined,
         },
       );
-      const count = await countItemsInCollection(settings, targetId);
-      return jsonOk({ item: created, target: parsed.data.target, count });
+      const count = await countItemsInCollection(settings, folder.id);
+      return jsonOk({ item: created, target: folder.name, count });
     } catch (err) {
       if (err instanceof RequiredFieldsError) {
         return jsonError(err.message, 400);

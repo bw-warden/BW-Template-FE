@@ -19,11 +19,12 @@ Here you will find a self-hosted **Bitwarden client template provisioner** you c
 
 ## What it does
 
-1. Creates nested client Shared Folders eg: (`Clients/{Name}/Software` and `…/Hardware`)
+1. Creates nested client Shared Folders from **admin-configured defaults** (any number of folder names, e.g. `Clients/{Name}/Software`, `…/Hardware`, `…/Network`)
 2. Clones admin-managed **Templates** items into those Shared Folders as **new** vault items (Templates are never shared into client Shared Folders)
 3. Offers typeahead lookup of existing clients for later adds
-4. Applies admin-configured Bitwarden **group** View/Edit access on new Software/Hardware Shared Folders
-5. Lets an admin upload an optional organization logo (**Settings → Branding**) for header / login / setup; the Bitwarden footer logo remains
+4. Applies admin-configured Bitwarden **group** access (view / view except passwords / edit / manage) on each new default Shared Folder
+5. Lets an admin upload an optional organization logo (**Settings → Branding**, **Choose file**) for header / login / setup; the Bitwarden footer logo remains
+6. Keeps the Bitwarden CLI (`bw serve`) warm so Clients / Provision do not pay a cold unlock on every request
 
 ## Getting started (Docker)
 
@@ -48,7 +49,7 @@ docker compose up -d --build
 
 4. Open http://localhost:3000 (or `http://<host>:3000` on your network)
 5. Complete **Create admin** on first load (`/setup`) — that account is the first (and initially only) admin
-6. Configure Bitwarden under **Settings** (org API key, vault service account, groups). Keys are entered in the UI, AES-encrypted in Redis — never committed
+6. Configure Bitwarden under **Settings** (org API key, vault service account, default Shared Folders + groups). Keys are entered in the UI, AES-encrypted in Redis — never committed
 
 ### Redis (required)
 
@@ -81,21 +82,24 @@ If you terminate TLS in front of the app (recommended for anything beyond local 
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `APP_SECRET` | Yes | Session cookie password + AES key for Bitwarden secrets and org tokens in Redis (min 32 chars) |
+| `APP_SECRET` | Yes | Session cookie password + AES key for Bitwarden secrets and org tokens in Redis (min 32 chars). Also used as bearer fallback for vault keepalive |
 | `CREDENTIALS_KEY` | No | Alias used if `APP_SECRET` is unset |
 | `COOKIE_SECURE` | No | Set `true` when serving over HTTPS |
 | `DATA_DIR` | No | Defaults to `/app/data` in Docker (CLI home + branding) |
 | `REDIS_PASSWORD` | Yes (Compose) | Password for the Compose `redis` service; Compose injects `REDIS_URL` from it |
 | `REDIS_URL` | Yes | Redis connection URL (required for app + local `npm run dev`) |
+| `VAULT_KEEPALIVE_MS` | No | In-process keep-alive interval for `bw serve` (default `240000` = 4 min). Set `0` to disable |
+| `VAULT_KEEPALIVE_SECRET` | No | Bearer token for `GET/POST /api/vault/keepalive`. Falls back to `APP_SECRET` when unset |
 
 ## First-load setup
 
 1. Empty Redis → **Create admin** (`/setup`) with email + password (first user is always admin)
 2. Setup locks once any user exists
 3. Thereafter every page/API requires session login (`/login`)
-4. **Settings → Branding**: optional organization logo
-5. **Settings**: region, org id, Organization API key, vault service account API key + master password, default Software/Hardware group access, Refresh groups, Test connection
+4. **Settings → Branding**: optional organization logo via **Choose file**
+5. **Settings**: region, org id, Organization API key, vault service account API key + master password, **Default Shared Folder access** (add any number of folder names + group permissions), Refresh groups, Test connection
 6. On login (when Bitwarden settings are ready), org **groups** are synced into Redis in the background
+7. On boot, the app warms the Bitwarden CLI vault session (see Vault keep-alive below)
 
 ## Bitwarden org prerequisites
 
@@ -104,16 +108,48 @@ If you terminate TLS in front of the app (recommended for anything beyond local 
    - `Clients`
    - `Templates` (service account / admins only — do not grant broad operator access here)
 3. Create an **Organization API key** (Public API)
-4. Create a **service account** user with vault access to `Templates` and ability to create items in client Software/Hardware Shared Folders. Generate that user’s **personal API key** + master password
-5. In **Settings → Default Shared Folder access**, refresh groups and assign permissions per group for Software and Hardware. Those presets apply when a **new** client’s nested Shared Folders are created
+4. Create a **service account** user with vault access to `Templates` and ability to create items in client nested Shared Folders. Generate that user’s **personal API key** + master password
+5. In **Settings → Default Shared Folder access**, add the nested folders you want on every new client (defaults seed as Software + Hardware). Refresh groups and assign permissions per folder. Those presets apply when a **new** client’s nested Shared Folders are created (existing clients are managed on the Clients tab)
 
 ## Product flows
 
-1. **Provision** (`/`): Client typeahead → select/create → multi-select templates → Software/Hardware → confirm → result
-2. **Clients** (`/clients`, admin): list client Shared Folders and edit live Software/Hardware group permissions
+1. **Provision** (`/`): Client typeahead → select/create → pick a nested Shared Folder → clone templates as new vault items
+2. **Clients** (`/clients`, admin): list client Shared Folders and edit live group permissions on each nested folder. Initial load reuses a recent vault sync; **Reload clients** forces a fresh sync
 3. **Templates** (`/templates`): create/delete template field shapes in the Templates Shared Folder
 4. **Users** (`/users`): manage local admin/member accounts
-5. **Settings** (`/settings`): branding logo + Bitwarden connection
+5. **Settings** (`/settings`): branding logo + Bitwarden connection + configurable default Shared Folders
+
+## Vault keep-alive
+
+Cold Bitwarden CLI unlock (logout → login → unlock → `bw serve`) can take ~15s+. The app keeps the vault warm so UI routes stay responsive.
+
+**In-process (default):** After boot, and every `VAULT_KEEPALIVE_MS` (default 4 minutes), the app ensures `bw serve` is unlocked and syncs if stale. Disable with `VAULT_KEEPALIVE_MS=0`.
+
+**HTTP endpoint (for Task Scheduler / cron):**
+
+```http
+GET /api/vault/keepalive?sync=1
+Authorization: Bearer <VAULT_KEEPALIVE_SECRET or APP_SECRET>
+```
+
+**Windows Task Scheduler** (host must reach the app on port 3000):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\register-vault-keepalive-task.ps1
+```
+
+One-shot / manual:
+
+```powershell
+.\scripts\vault-keepalive.ps1
+```
+
+Or with curl:
+
+```bash
+curl -sS -H "Authorization: Bearer $APP_SECRET" \
+  "http://127.0.0.1:3000/api/vault/keepalive?sync=1"
+```
 
 ## Local development (optional)
 
@@ -142,7 +178,7 @@ Feel free to swap pieces that fit your environment; the notes below reflect what
 | Password hashing | **bcrypt** | Local admin/member accounts only (not Bitwarden login) |
 | Secrets at rest | **AES-256-GCM** (Node `crypto`) | Bitwarden API keys / master password and org OAuth tokens in Redis |
 | Bitwarden org API | **Public API** (HTTP) | Groups, Shared Folder (collection) create + access |
-| Bitwarden vault | **CLI `bw`** | Unlock + item create; image pins `cli-v2025.12.1` |
+| Bitwarden vault | **CLI `bw`** | Unlock + item create; image pins `cli-v2025.12.1`; keep-alive via instrumentation + `/api/vault/keepalive` |
 | Runtime | **Node.js 22** | Docker base: `node:22-bookworm-slim` |
 | Packaging | **Docker Compose** | `app` + `redis`, port `3000`, volume `./data` |
 | Optional edge | Bring your own | Terminate TLS / tunnel (e.g. cloudflared) in front of the app if you want it |
@@ -154,6 +190,7 @@ Feel free to swap pieces that fit your environment; the notes below reflect what
 - **Bitwarden API keys and vault master password** are AES-256-GCM encrypted in Redis (key derived from `APP_SECRET`). Settings APIs never return secret values — only a “configured” flag.
 - **Org API OAuth tokens** in Redis use the same encryption (not plaintext).
 - **Sessions** are httpOnly iron-session cookies (8h TTL). Set `COOKIE_SECURE=true` behind HTTPS.
+- **Vault keepalive** accepts a bearer secret only (`VAULT_KEEPALIVE_SECRET` or `APP_SECRET`); do not expose that endpoint publicly without network controls.
 - **`bw` CLI children** receive a minimal environment (no `APP_SECRET` / `REDIS_URL`). Treat `$DATA_DIR/bw-home` as sensitive.
 - **Login and first-time setup** are rate-limited per IP (and email). API errors to the browser are generic; details stay in server logs.
 - Generate unique `APP_SECRET` and `REDIS_PASSWORD` per deployment; never reuse `.env.example` placeholders.

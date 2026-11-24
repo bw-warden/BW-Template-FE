@@ -297,12 +297,16 @@ export async function ensureRootCollection(
   return createCollection(settings, rootName, []);
 }
 
+export type ClientFolder = {
+  name: string;
+  id: string;
+};
+
 export type ClientNode = {
   id: string;
   name: string;
   path: string;
-  softwareId: string | null;
-  hardwareId: string | null;
+  folders: ClientFolder[];
 };
 
 /** Client folders are direct children of Clients root: Clients/{Name}. */
@@ -312,7 +316,6 @@ export function listClientNodes(
 ): ClientNode[] {
   const root = clientsRoot.trim();
   const prefix = `${root}/`;
-  const byName = new Map(collections.map((c) => [c.name, c]));
 
   const clients = collections.filter((c) => {
     if (!c.name.startsWith(prefix)) return false;
@@ -323,17 +326,34 @@ export function listClientNodes(
   return clients
     .map((c) => {
       const name = c.name.slice(prefix.length);
-      const software = byName.get(`${c.name}/Software`);
-      const hardware = byName.get(`${c.name}/Hardware`);
+      const childPrefix = `${c.name}/`;
+      const folders = collections
+        .filter((col) => {
+          if (!col.name.startsWith(childPrefix)) return false;
+          const rest = col.name.slice(childPrefix.length);
+          return rest.length > 0 && !rest.includes("/");
+        })
+        .map((col) => ({
+          name: col.name.slice(childPrefix.length),
+          id: col.id,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
       return {
         id: c.id,
         name,
         path: c.name,
-        softwareId: software?.id ?? null,
-        hardwareId: hardware?.id ?? null,
+        folders,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function findClientFolder(
+  client: ClientNode,
+  folderName: string,
+): ClientFolder | undefined {
+  const norm = folderName.trim().toLowerCase();
+  return client.folders.find((f) => f.name.trim().toLowerCase() === norm);
 }
 
 export async function findClientNode(
@@ -371,20 +391,14 @@ async function provisionClientNow(
   }
 
   const root = settings.clientsRootName || "Clients";
-  const collections = await listCollections(settings, { fresh: true });
+  let collections = await listCollections(settings, { fresh: true });
   if (!findCollectionByName(collections, root)) {
     await createCollection(settings, root, []);
+    collections = await listCollections(settings, { fresh: true });
   }
 
   const clientPath = `${root}/${name}`;
-  const softwarePath = `${clientPath}/Software`;
-  const hardwarePath = `${clientPath}/Hardware`;
-  const softwareGroups = toBwGroupAccess(
-    (settings.softwareAccess ?? []) as CollectionAccessGrant[],
-  );
-  const hardwareGroups = toBwGroupAccess(
-    (settings.hardwareAccess ?? []) as CollectionAccessGrant[],
-  );
+  const defaultFolders = settings.defaultFolders ?? [];
 
   let client = findCollectionByName(collections, clientPath);
   if (!client) {
@@ -392,22 +406,39 @@ async function provisionClientNow(
   }
 
   // Apply defaults only when creating nested collections — existing
-  // Software/Hardware access is owned by the Clients admin tab.
-  let software = findCollectionByName(collections, softwarePath);
-  if (!software) {
-    software = await createCollection(settings, softwarePath, softwareGroups);
+  // nested-folder access is owned by the Clients admin tab.
+  const folders: ClientFolder[] = [];
+  for (const def of defaultFolders) {
+    const folderName = def.name.trim();
+    if (!folderName || folderName.includes("/")) continue;
+    const folderPath = `${clientPath}/${folderName}`;
+    let folder = findCollectionByName(collections, folderPath);
+    if (!folder) {
+      folder = await createCollection(
+        settings,
+        folderPath,
+        toBwGroupAccess((def.access ?? []) as CollectionAccessGrant[]),
+      );
+      collections = [...collections, folder];
+    }
+    folders.push({ name: folderName, id: folder.id });
   }
 
-  let hardware = findCollectionByName(collections, hardwarePath);
-  if (!hardware) {
-    hardware = await createCollection(settings, hardwarePath, hardwareGroups);
+  // Include any other nested folders already present under this client.
+  const childPrefix = `${clientPath}/`;
+  for (const col of collections) {
+    if (!col.name.startsWith(childPrefix)) continue;
+    const rest = col.name.slice(childPrefix.length);
+    if (!rest || rest.includes("/")) continue;
+    if (folders.some((f) => f.id === col.id)) continue;
+    folders.push({ name: rest, id: col.id });
   }
+  folders.sort((a, b) => a.name.localeCompare(b.name));
 
   return {
     id: client.id,
     name,
     path: clientPath,
-    softwareId: software.id,
-    hardwareId: hardware.id,
+    folders,
   };
 }

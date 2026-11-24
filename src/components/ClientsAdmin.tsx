@@ -9,14 +9,17 @@ import type { CollectionAccessGrant } from "@/lib/collection-access";
 
 type NamedGrant = CollectionAccessGrant & { groupName?: string };
 
+type ClientFolderAccess = {
+  name: string;
+  collectionId: string;
+  groups: NamedGrant[];
+};
+
 type ClientAccess = {
   id: string;
   name: string;
   path: string;
-  softwareId: string | null;
-  hardwareId: string | null;
-  software: { collectionId: string | null; groups: NamedGrant[] };
-  hardware: { collectionId: string | null; groups: NamedGrant[] };
+  folders: ClientFolderAccess[];
 };
 
 function formatSyncedAt(iso: string | null) {
@@ -48,7 +51,7 @@ export function ClientsAdmin() {
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<
-    Record<string, { software: CollectionAccessGrant[]; hardware: CollectionAccessGrant[] }>
+    Record<string, Record<string, CollectionAccessGrant[]>>
   >({});
   const [loading, setLoading] = useState(true);
   const [refreshingGroups, setRefreshingGroups] = useState(false);
@@ -56,40 +59,40 @@ export function ClientsAdmin() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function loadGroups() {
-    const res = await fetch("/api/groups");
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to load groups");
-    setGroups(
-      (data.groups || []).map((g: { id: string; name: string }) => ({
-        id: g.id,
-        name: g.name,
-      })),
-    );
-    setSyncedAt(data.syncedAt || null);
-  }
-
-  async function loadClients() {
-    const res = await fetch("/api/clients/access");
+  async function loadClients(opts: { fresh?: boolean } = {}) {
+    const qs = opts.fresh ? "?fresh=1" : "";
+    const res = await fetch(`/api/clients/access${qs}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load clients");
     const list = (data.clients || []) as ClientAccess[];
     setClients(list);
+    if (Array.isArray(data.groups)) {
+      setGroups(
+        data.groups.map((g: { id: string; name: string }) => ({
+          id: g.id,
+          name: g.name,
+        })),
+      );
+    }
+    if (data.syncedAt !== undefined) {
+      setSyncedAt(data.syncedAt || null);
+    }
     const nextDrafts: typeof drafts = {};
     for (const c of list) {
-      nextDrafts[c.id] = {
-        software: toGrants(c.software.groups),
-        hardware: toGrants(c.hardware.groups),
-      };
+      const folderDrafts: Record<string, CollectionAccessGrant[]> = {};
+      for (const folder of c.folders) {
+        folderDrafts[folder.name] = toGrants(folder.groups);
+      }
+      nextDrafts[c.id] = folderDrafts;
     }
     setDrafts(nextDrafts);
   }
 
-  async function load() {
+  async function load(opts: { fresh?: boolean } = {}) {
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([loadClients(), loadGroups()]);
+      await loadClients(opts);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -126,15 +129,14 @@ export function ClientsAdmin() {
 
   function updateDraft(
     clientId: string,
-    target: "software" | "hardware",
+    folderName: string,
     grants: CollectionAccessGrant[],
   ) {
     setDrafts((prev) => ({
       ...prev,
       [clientId]: {
-        software: prev[clientId]?.software || [],
-        hardware: prev[clientId]?.hardware || [],
-        [target]: grants,
+        ...(prev[clientId] || {}),
+        [folderName]: grants,
       },
     }));
   }
@@ -144,14 +146,15 @@ export function ClientsAdmin() {
     setError(null);
     setMessage(null);
     try {
-      const draft = drafts[client.id] || { software: [], hardware: [] };
+      const draft = drafts[client.id] || {};
+      const folders = client.folders.map((folder) => ({
+        name: folder.name,
+        access: draft[folder.name] || [],
+      }));
       const res = await fetch(`/api/clients/${client.id}/access`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          software: draft.software,
-          hardware: draft.hardware,
-        }),
+        body: JSON.stringify({ folders }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to update access");
@@ -161,18 +164,19 @@ export function ClientsAdmin() {
           if (c.id !== client.id) return c;
           return {
             ...c,
-            software: {
-              ...c.software,
-              groups: withNames(draft.software, groups),
-            },
-            hardware: {
-              ...c.hardware,
-              groups: withNames(draft.hardware, groups),
-            },
+            folders: c.folders.map((folder) => ({
+              ...folder,
+              groups: withNames(draft[folder.name] || [], groups),
+            })),
           };
         }),
       );
-      setMessage(`Updated Software and Hardware access for ${client.name}.`);
+      const names = client.folders.map((f) => f.name).join(", ");
+      setMessage(
+        names
+          ? `Updated access for ${client.name} (${names}).`
+          : `Updated access for ${client.name}.`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -203,16 +207,17 @@ export function ClientsAdmin() {
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => void load()}
+              disabled={loading}
+              onClick={() => void load({ fresh: true })}
             >
-              Reload clients
+              {loading ? "Loading…" : "Reload clients"}
             </button>
           </div>
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
-          Live Software and Hardware Shared Folder permissions from Bitwarden
-          (Can view / Can view, except passwords / Can edit / Can manage).
-          Defaults for new clients are configured in Settings.
+          Live nested Shared Folder permissions from Bitwarden (Can view / Can
+          view, except passwords / Can edit / Can manage). Defaults for new
+          clients are configured in Settings.
         </p>
 
         {clients.length === 0 ? (
@@ -221,12 +226,9 @@ export function ClientsAdmin() {
           <ul className="client-access-list">
             {clients.map((client) => {
               const open = expandedId === client.id;
-              const draft = drafts[client.id] || {
-                software: [],
-                hardware: [],
-              };
+              const draft = drafts[client.id] || {};
               const saving = savingId === client.id;
-              const canSave = Boolean(client.softwareId && client.hardwareId);
+              const canSave = client.folders.length > 0;
               return (
                 <li key={client.id} className="client-access-item">
                   <button
@@ -244,41 +246,30 @@ export function ClientsAdmin() {
 
                   {open && (
                     <div className="client-access-body">
-                      <div className="access-editors">
-                        <div className="access-editor-block">
-                          <CollectionAccessEditor
-                            title="Software"
-                            grants={draft.software}
-                            groups={groups}
-                            disabled={saving}
-                            onChange={(grants) =>
-                              updateDraft(client.id, "software", grants)
-                            }
-                          />
-                          {!client.softwareId && (
-                            <p className="banner banner-warn">
-                              Software Shared Folder missing for this client.
-                            </p>
-                          )}
+                      {client.folders.length === 0 ? (
+                        <p className="banner banner-warn">
+                          No nested Shared Folders found for this client.
+                        </p>
+                      ) : (
+                        <div className="access-editors">
+                          {client.folders.map((folder) => (
+                            <div
+                              key={folder.collectionId}
+                              className="access-editor-block"
+                            >
+                              <CollectionAccessEditor
+                                title={folder.name}
+                                grants={draft[folder.name] || []}
+                                groups={groups}
+                                disabled={saving}
+                                onChange={(grants) =>
+                                  updateDraft(client.id, folder.name, grants)
+                                }
+                              />
+                            </div>
+                          ))}
                         </div>
-
-                        <div className="access-editor-block">
-                          <CollectionAccessEditor
-                            title="Hardware"
-                            grants={draft.hardware}
-                            groups={groups}
-                            disabled={saving}
-                            onChange={(grants) =>
-                              updateDraft(client.id, "hardware", grants)
-                            }
-                          />
-                          {!client.hardwareId && (
-                            <p className="banner banner-warn">
-                              Hardware Shared Folder missing for this client.
-                            </p>
-                          )}
-                        </div>
-                      </div>
+                      )}
 
                       <div className="btn-row" style={{ marginTop: "0.85rem" }}>
                         <button

@@ -27,11 +27,6 @@ function itemTypeLabel(type: number): string {
   return ITEM_TYPE_LABELS[type] ?? "Item";
 }
 
-const TARGET_LABEL: Record<Target, string> = {
-  software: "Software",
-  hardware: "Hardware",
-};
-
 const STEPS = ["Client", "Add items"] as const;
 
 async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -56,8 +51,8 @@ export function ProvisionWizard({
   const [templates, setTemplates] = useState<SafeTemplate[]>([]);
   const [templatesLoaded, setTemplatesLoaded] = useState(false);
   const [filter, setFilter] = useState("");
-  const [target, setTarget] = useState<Target>("software");
-  const [counts, setCounts] = useState<Record<Target, number> | null>(null);
+  const [target, setTarget] = useState<Target>("");
+  const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [bumped, setBumped] = useState<Target | null>(null);
   const [modalTemplate, setModalTemplate] = useState<SafeTemplate | null>(null);
   const [added, setAdded] = useState<AddedItem[]>([]);
@@ -137,13 +132,17 @@ export function ProvisionWizard({
       // Sequential: the vault CLI shares one session and sync state.
       await ensureTemplates();
       if (!isCurrent(op.id)) return;
-      const data = await getJson<{ software: number; hardware: number }>(
+      const data = await getJson<{ counts: Record<string, number> }>(
         `/api/clients/${c.id}/counts`,
         { signal: op.signal },
       );
       if (!isCurrent(op.id)) return;
+      const folderNames = (c.folders || []).map((f) => f.name);
       setClient(c);
-      setCounts({ software: data.software, hardware: data.hardware });
+      setCounts(data.counts || {});
+      setTarget((prev) =>
+        folderNames.includes(prev) ? prev : folderNames[0] || "",
+      );
       setAdded([]);
       setFilter("");
       setStep(1);
@@ -167,7 +166,7 @@ export function ProvisionWizard({
     setError(null);
     const op = startOp({
       label: `Creating ${name}`,
-      detail: "Setting up Software and Hardware",
+      detail: "Setting up default Shared Folders",
     });
     // Not aborted on cancel: the server finishes creating, so keep the result.
     let created: ClientOption;
@@ -202,8 +201,7 @@ export function ProvisionWizard({
     setModalTemplate(null);
     setTarget(result.target);
     setCounts((prev) => ({
-      software: prev?.software ?? 0,
-      hardware: prev?.hardware ?? 0,
+      ...(prev || {}),
       [result.target]: result.count,
     }));
     setBumped(result.target);
@@ -220,10 +218,10 @@ export function ProvisionWizard({
     setError(null);
     try {
       // Counts sync the vault first, so the template list after it is current too.
-      const countsData = await getJson<{ software: number; hardware: number }>(
+      const countsData = await getJson<{ counts: Record<string, number> }>(
         `/api/clients/${client.id}/counts?fresh=1`,
       );
-      setCounts({ software: countsData.software, hardware: countsData.hardware });
+      setCounts(countsData.counts || {});
 
       const tplData = await getJson<{ templates: SafeTemplate[] }>("/api/templates");
       setTemplates(tplData.templates || []);
@@ -234,6 +232,11 @@ export function ProvisionWizard({
       setRefreshing(false);
     }
   }
+
+  const folderNames = useMemo(
+    () => (client?.folders || []).map((f) => f.name),
+    [client],
+  );
 
   function changeClient() {
     setStep(0);
@@ -342,28 +345,35 @@ export function ProvisionWizard({
             Templates stay untouched.
           </p>
 
-          <div className="target-toggle" style={{ marginBottom: 16 }}>
-            {(["software", "hardware"] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                className="target-option"
-                data-selected={target === t ? "true" : "false"}
-                onClick={() => setTarget(t)}
-              >
-                <div className="target-option-head">
-                  <strong>{TARGET_LABEL[t]}</strong>
-                  <span
-                    className="count-badge"
-                    data-bumped={bumped === t ? "true" : "false"}
-                    aria-label={`${counts?.[t] ?? 0} items`}
-                  >
-                    {`${counts?.[t] ?? 0} item${counts?.[t] === 1 ? "" : "s"}`}
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
+          {folderNames.length === 0 ? (
+            <div className="banner banner-warn" style={{ marginBottom: 16 }}>
+              This client has no nested Shared Folders. Re-create it or add
+              folders in Bitwarden.
+            </div>
+          ) : (
+            <div className="target-toggle" style={{ marginBottom: 16 }}>
+              {folderNames.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className="target-option"
+                  data-selected={target === t ? "true" : "false"}
+                  onClick={() => setTarget(t)}
+                >
+                  <div className="target-option-head">
+                    <strong>{t}</strong>
+                    <span
+                      className="count-badge"
+                      data-bumped={bumped === t ? "true" : "false"}
+                      aria-label={`${counts?.[t] ?? 0} items`}
+                    >
+                      {`${counts?.[t] ?? 0} item${counts?.[t] === 1 ? "" : "s"}`}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
 
           {templatesLoaded && templates.length === 0 && (
             <div className="empty">
@@ -456,7 +466,7 @@ export function ProvisionWizard({
                 {added.map((a) => (
                   <li key={a.at}>
                     <strong>{a.name}</strong>
-                    <span className="muted"> → {TARGET_LABEL[a.target]}</span>
+                    <span className="muted"> → {a.target}</span>
                   </li>
                 ))}
               </ul>
@@ -471,7 +481,8 @@ export function ProvisionWizard({
           templateName={modalTemplate.name}
           clientId={client.id}
           clientName={client.name}
-          defaultTarget={target}
+          folderNames={folderNames}
+          defaultTarget={target || folderNames[0] || ""}
           onClose={() => setModalTemplate(null)}
           onSaved={onSaved}
         />

@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "BW-Template-FE — Client Templates",
   description:
-    "Provision Bitwarden client Shared Folders and clone admin templates into Software/Hardware.",
+    "Provision Bitwarden client Shared Folders and clone admin templates into nested Shared Folders.",
 };
 
 export default function RootLayout({

@@ -14,7 +14,7 @@ export default async function HomePage() {
       <AppHeader email={email} isAdmin={isAdmin} />
       <PageHero
         title="Provision templates"
-        copy="Pick a client, choose templates, and clone them into Software or Hardware as new vault items."
+        copy="Pick a client, choose templates, and clone them into a client Shared Folder as new vault items."
       />
       <main className="main">
         <ProvisionWizard configured={settingsConfigured} isAdmin={isAdmin} />

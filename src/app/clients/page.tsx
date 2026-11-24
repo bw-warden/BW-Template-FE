@@ -15,7 +15,7 @@ export default async function ClientsPage() {
       <PageHero
         kicker="Shared Folders"
         title="Clients"
-        copy="Review every client's Shared Folders and adjust Software and Hardware group permissions in Bitwarden."
+        copy="Review every client's nested Shared Folders and adjust group permissions in Bitwarden."
       />
       <main className="main">
         <ClientsAdmin />

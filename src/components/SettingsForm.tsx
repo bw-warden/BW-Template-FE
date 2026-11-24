@@ -6,6 +6,7 @@ import {
   type GroupOption,
 } from "@/components/CollectionAccessEditor";
 import type { CollectionAccessGrant } from "@/lib/collection-access";
+import type { DefaultSharedFolder } from "@/lib/settings";
 
 type Masked = {
   configured: boolean;
@@ -18,8 +19,7 @@ type Masked = {
   vaultMasterPassword: { configured: boolean };
   clientsRootName: string;
   templatesRootName: string;
-  softwareAccess: CollectionAccessGrant[];
-  hardwareAccess: CollectionAccessGrant[];
+  defaultFolders: DefaultSharedFolder[];
 };
 
 type FormState = {
@@ -32,8 +32,7 @@ type FormState = {
   vaultMasterPassword: string;
   clientsRootName: string;
   templatesRootName: string;
-  softwareAccess: CollectionAccessGrant[];
-  hardwareAccess: CollectionAccessGrant[];
+  defaultFolders: DefaultSharedFolder[];
 };
 
 const emptyForm: FormState = {
@@ -46,8 +45,10 @@ const emptyForm: FormState = {
   vaultMasterPassword: "",
   clientsRootName: "Clients",
   templatesRootName: "Templates",
-  softwareAccess: [],
-  hardwareAccess: [],
+  defaultFolders: [
+    { name: "Software", access: [] },
+    { name: "Hardware", access: [] },
+  ],
 };
 
 function formatSyncedAt(iso: string | null) {
@@ -57,6 +58,10 @@ function formatSyncedAt(iso: string | null) {
   } catch {
     return `Last synced ${iso}`;
   }
+}
+
+function normalizeFolderName(name: string) {
+  return name.trim();
 }
 
 export function SettingsForm() {
@@ -71,6 +76,7 @@ export function SettingsForm() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [newFolderName, setNewFolderName] = useState("");
 
   useEffect(() => {
     void load();
@@ -107,8 +113,10 @@ export function SettingsForm() {
         vaultMasterPassword: "",
         clientsRootName: data.clientsRootName || "Clients",
         templatesRootName: data.templatesRootName || "Templates",
-        softwareAccess: data.softwareAccess || [],
-        hardwareAccess: data.hardwareAccess || [],
+        defaultFolders:
+          data.defaultFolders?.length > 0
+            ? data.defaultFolders
+            : emptyForm.defaultFolders,
       });
       await loadGroups().catch(() => {
         setGroups([]);
@@ -123,6 +131,56 @@ export function SettingsForm() {
 
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function renameFolder(index: number, name: string) {
+    setForm((prev) => {
+      const defaultFolders = prev.defaultFolders.map((f, i) =>
+        i === index ? { ...f, name } : f,
+      );
+      return { ...prev, defaultFolders };
+    });
+  }
+
+  function setFolderAccess(index: number, access: CollectionAccessGrant[]) {
+    setForm((prev) => {
+      const defaultFolders = prev.defaultFolders.map((f, i) =>
+        i === index ? { ...f, access } : f,
+      );
+      return { ...prev, defaultFolders };
+    });
+  }
+
+  function removeFolder(index: number) {
+    setForm((prev) => ({
+      ...prev,
+      defaultFolders: prev.defaultFolders.filter((_, i) => i !== index),
+    }));
+  }
+
+  function addFolder() {
+    const name = normalizeFolderName(newFolderName);
+    setError(null);
+    if (!name) {
+      setError("Folder name is required");
+      return;
+    }
+    if (name.includes("/")) {
+      setError("Folder name cannot contain '/'");
+      return;
+    }
+    const exists = form.defaultFolders.some(
+      (f) => f.name.trim().toLowerCase() === name.toLowerCase(),
+    );
+    if (exists) {
+      setError(`A default folder named “${name}” already exists`);
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      defaultFolders: [...prev.defaultFolders, { name, access: [] }],
+    }));
+    setNewFolderName("");
   }
 
   async function refreshGroups() {
@@ -154,14 +212,32 @@ export function SettingsForm() {
     setMessage(null);
     setError(null);
     try {
+      const folders = form.defaultFolders.map((f) => ({
+        ...f,
+        name: normalizeFolderName(f.name),
+      }));
+      for (const f of folders) {
+        if (!f.name) throw new Error("Every default folder needs a name");
+        if (f.name.includes("/")) {
+          throw new Error("Folder names cannot contain '/'");
+        }
+      }
+      const seen = new Set<string>();
+      for (const f of folders) {
+        const key = f.name.toLowerCase();
+        if (seen.has(key)) {
+          throw new Error(`Duplicate default folder name: ${f.name}`);
+        }
+        seen.add(key);
+      }
+
       const payload: Record<string, unknown> = {
         region: form.region,
         orgId: form.orgId,
         orgApiClientId: form.orgApiClientId,
         clientsRootName: form.clientsRootName,
         templatesRootName: form.templatesRootName,
-        softwareAccess: form.softwareAccess,
-        hardwareAccess: form.hardwareAccess,
+        defaultFolders: folders,
       };
       if (form.orgApiClientSecret.trim()) {
         payload.orgApiClientSecret = form.orgApiClientSecret.trim();
@@ -190,8 +266,10 @@ export function SettingsForm() {
         vaultApiClientSecret: "",
         vaultMasterPassword: "",
         vaultApiClientId: data.vaultApiClientId || prev.vaultApiClientId,
-        softwareAccess: data.softwareAccess || prev.softwareAccess,
-        hardwareAccess: data.hardwareAccess || prev.hardwareAccess,
+        defaultFolders:
+          data.defaultFolders?.length > 0
+            ? data.defaultFolders
+            : prev.defaultFolders,
       }));
       setMessage("Settings saved. Secrets remain encrypted server-side.");
     } catch (err) {
@@ -358,25 +436,75 @@ export function SettingsForm() {
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
           Bitwarden Shared Folder permissions (Can view / Can view, except
-          passwords / Can edit / Can manage). Applied when a new client&apos;s
-          Software or Hardware Shared Folder is created. Existing clients are
+          passwords / Can edit / Can manage). Each default folder is created
+          under a new client with these group assignments. Existing clients are
           managed on the Clients tab.
         </p>
-        <div className="access-editors">
-          <CollectionAccessEditor
-            title="Software"
-            grants={form.softwareAccess}
-            groups={groups}
+
+        {form.defaultFolders.length === 0 ? (
+          <p className="muted">
+            No default folders yet. Add at least one so new clients get nested
+            Shared Folders.
+          </p>
+        ) : (
+          <div className="access-editors">
+            {form.defaultFolders.map((folder, index) => (
+              <div key={index} className="access-editor-block default-folder-card">
+                <div className="default-folder-head">
+                  <label className="label default-folder-name">
+                    Folder name
+                    <input
+                      className="field"
+                      value={folder.name}
+                      disabled={saving}
+                      onChange={(e) => renameFolder(index, e.target.value)}
+                      aria-label={`Default folder ${index + 1} name`}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-compact"
+                    disabled={saving}
+                    onClick={() => removeFolder(index)}
+                  >
+                    Remove
+                  </button>
+                </div>
+                <CollectionAccessEditor
+                  title={folder.name.trim() || "Unnamed folder"}
+                  grants={folder.access}
+                  groups={groups}
+                  disabled={saving}
+                  onChange={(access) => setFolderAccess(index, access)}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="default-folder-add">
+          <input
+            className="field"
+            value={newFolderName}
             disabled={saving}
-            onChange={(softwareAccess) => setField("softwareAccess", softwareAccess)}
+            placeholder="New folder name (e.g. Network)"
+            onChange={(e) => setNewFolderName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addFolder();
+              }
+            }}
+            aria-label="New default folder name"
           />
-          <CollectionAccessEditor
-            title="Hardware"
-            grants={form.hardwareAccess}
-            groups={groups}
-            disabled={saving}
-            onChange={(hardwareAccess) => setField("hardwareAccess", hardwareAccess)}
-          />
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={saving || !newFolderName.trim()}
+            onClick={addFolder}
+          >
+            Add default folder
+          </button>
         </div>
       </div>
 

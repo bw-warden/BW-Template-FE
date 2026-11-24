@@ -6,8 +6,7 @@ export type ClientOption = {
   id: string;
   name: string;
   path: string;
-  softwareId: string | null;
-  hardwareId: string | null;
+  folders: Array<{ name: string; id: string }>;
 };
 
 type Props = {

@@ -386,6 +386,89 @@ export async function syncNow(settings: BitwardenSettings): Promise<void> {
   await syncVault(settings);
 }
 
+export type VaultKeepaliveResult = {
+  ok: boolean;
+  warmed: boolean;
+  synced: boolean;
+  status: string;
+  durationMs: number;
+  message: string;
+};
+
+/**
+ * Ensure `bw serve` is up (unlock if needed) and optionally sync.
+ * Used by /api/vault/keepalive and the in-process keep-alive loop.
+ */
+export async function keepVaultAlive(
+  settings: BitwardenSettings,
+  opts: { sync?: boolean } = {},
+): Promise<VaultKeepaliveResult> {
+  const started = Date.now();
+  const hadSession = Boolean(getSession());
+  await ensureUnlocked(settings);
+
+  let synced = false;
+  if (opts.sync) {
+    await syncIfStale(settings);
+    synced = true;
+  }
+
+  const data = await serveRequest<{ template?: { status?: string } }>(
+    "GET",
+    "/status",
+  );
+  const status = data?.template?.status ?? "unknown";
+  const durationMs = Date.now() - started;
+  return {
+    ok: true,
+    warmed: !hadSession,
+    synced,
+    status,
+    durationMs,
+    message: hadSession
+      ? `Vault already unlocked (${status})`
+      : `Vault unlocked (${status})`,
+  };
+}
+
+/** In-process timer so Docker/Node keeps `bw serve` warm without an external cron. */
+export function startVaultKeepaliveLoop(intervalMs: number): void {
+  const g = globalThis as typeof globalThis & {
+    __bwKeepaliveTimer?: ReturnType<typeof setInterval> | null;
+  };
+  if (g.__bwKeepaliveTimer) return;
+  if (!Number.isFinite(intervalMs) || intervalMs < 30_000) {
+    console.warn(
+      `[bw] keepalive loop skipped: interval must be ≥30000ms (got ${intervalMs})`,
+    );
+    return;
+  }
+
+  const tick = async () => {
+    try {
+      const { loadSettings, settingsReady } = await import("@/lib/settings");
+      const settings = await loadSettings();
+      if (!settingsReady(settings)) return;
+      const result = await keepVaultAlive(settings!, { sync: true });
+      console.log(
+        `[bw] keepalive ${result.durationMs}ms warmed=${result.warmed} synced=${result.synced} status=${result.status}`,
+      );
+    } catch (err) {
+      console.error(
+        "[bw] keepalive failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  };
+
+  // Warm shortly after boot so the first UI request is not a cold unlock.
+  setTimeout(() => void tick(), 3_000);
+  g.__bwKeepaliveTimer = setInterval(() => void tick(), intervalMs);
+  // Don't keep the process alive solely for this timer in weird runtimes.
+  g.__bwKeepaliveTimer.unref?.();
+  console.log(`[bw] keepalive loop every ${intervalMs}ms`);
+}
+
 export async function listItemsInCollection(
   settings: BitwardenSettings,
   collectionId: string,

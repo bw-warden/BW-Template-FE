@@ -35,6 +35,9 @@ services:
       HOSTNAME: "0.0.0.0"
       PORT: "3000"
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      # Warm `bw serve` after boot and every N ms (0 = off). External cron optional.
+      VAULT_KEEPALIVE_MS: ${VAULT_KEEPALIVE_MS:-240000}
+      VAULT_KEEPALIVE_SECRET: ${VAULT_KEEPALIVE_SECRET:-}
     volumes:
       - ./data:/app/data
     depends_on:
