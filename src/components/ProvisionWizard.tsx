@@ -338,7 +338,7 @@ export function ProvisionWizard({
             />
           )}
           <p className="muted" style={{ marginTop: 6 }}>
-            Choose a collection, then press + on a template to fill in a new item.
+            Choose a Shared Folder, then press + on a template to fill in a new item.
             Templates stay untouched.
           </p>
 

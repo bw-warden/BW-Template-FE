@@ -13,9 +13,9 @@ export default async function ClientsPage() {
     <div className="app-shell">
       <AppHeader email={email} isAdmin />
       <PageHero
-        kicker="Collections"
+        kicker="Shared Folders"
         title="Clients"
-        copy="Review every client collection and adjust Software and Hardware group permissions in Bitwarden."
+        copy="Review every client's Shared Folders and adjust Software and Hardware group permissions in Bitwarden."
       />
       <main className="main">
         <ClientsAdmin />

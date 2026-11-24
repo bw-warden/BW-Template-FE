@@ -1,23 +1,10 @@
 import type { Metadata } from "next";
-import { Montserrat, Open_Sans } from "next/font/google";
 import "./globals.css";
 
-const display = Montserrat({
-  variable: "--font-display",
-  subsets: ["latin"],
-  weight: ["600", "700"],
-});
-
-const body = Open_Sans({
-  variable: "--font-body",
-  subsets: ["latin"],
-  weight: ["400", "600", "700"],
-});
-
 export const metadata: Metadata = {
-  title: "BW FrontEnd — Client Templates",
+  title: "BW-Template-FE — Client Templates",
   description:
-    "Provision Bitwarden client collections and clone admin templates into Software/Hardware.",
+    "Provision Bitwarden client Shared Folders and clone admin templates into Software/Hardware.",
 };
 
 export default function RootLayout({
@@ -27,9 +14,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${display.variable} ${body.variable} antialiased`}>
-        {children}
-      </body>
+      <head>
+        {/* Loaded at runtime to avoid flaky next/font Google URL parsing during Docker builds. */}
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link
+          href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700&family=Open+Sans:wght@400;600;700&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="antialiased">{children}</body>
     </html>
   );
 }

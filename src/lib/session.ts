@@ -1,5 +1,6 @@
 import { getIronSession, SessionOptions } from "iron-session";
 import { cookies } from "next/headers";
+import { requireAppSecret } from "@/lib/crypto";
 import { findUserById, UserRole } from "@/lib/db";
 
 export type SessionData = {
@@ -14,22 +15,21 @@ export type AppUser = {
   role: UserRole;
 };
 
+/** 8 hours — short-lived admin sessions for a credentialed ops tool. */
+const SESSION_TTL_SECONDS = 60 * 60 * 8;
+
 function sessionOptions(): SessionOptions {
-  const password = process.env.APP_SECRET || process.env.CREDENTIALS_KEY;
-  if (!password || password.length < 32) {
-    throw new Error(
-      "APP_SECRET (or CREDENTIALS_KEY) must be at least 32 characters for sessions",
-    );
-  }
   return {
-    password,
-    cookieName: "bw_frontend_session",
+    password: requireAppSecret(),
+    cookieName: "bw_template_fe_session",
+    ttl: SESSION_TTL_SECONDS,
     cookieOptions: {
       httpOnly: true,
       // Set COOKIE_SECURE=true when serving over HTTPS (reverse proxy / TLS)
       secure: process.env.COOKIE_SECURE === "true",
       sameSite: "lax",
       path: "/",
+      maxAge: SESSION_TTL_SECONDS,
     },
   };
 }

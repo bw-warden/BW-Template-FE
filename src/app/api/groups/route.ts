@@ -5,6 +5,6 @@ export const runtime = "nodejs";
 
 export async function GET() {
   return withAdmin(async () => {
-    return jsonOk(getCachedGroupsPayload());
+    return jsonOk(await getCachedGroupsPayload());
   });
 }

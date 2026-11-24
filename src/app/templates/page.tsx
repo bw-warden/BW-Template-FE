@@ -15,7 +15,7 @@ export default async function TemplatesPage() {
       <PageHero
         kicker="Template library"
         title="Templates"
-        copy="Manage field shapes in the Templates collection. Operators never need Bitwarden access to Templates — the service account clones items for them."
+        copy="Manage field shapes in the Templates Shared Folder. Operators never need Bitwarden access to Templates — the service account clones items for them."
       />
       <main className="main">
         <TemplatesAdmin configured={settingsConfigured} />

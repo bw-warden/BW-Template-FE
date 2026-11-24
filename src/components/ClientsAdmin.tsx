@@ -210,13 +210,13 @@ export function ClientsAdmin() {
           </div>
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
-          Live Software and Hardware collection permissions from Bitwarden
+          Live Software and Hardware Shared Folder permissions from Bitwarden
           (Can view / Can view, except passwords / Can edit / Can manage).
           Defaults for new clients are configured in Settings.
         </p>
 
         {clients.length === 0 ? (
-          <div className="empty">No client collections found.</div>
+          <div className="empty">No client Shared Folders found.</div>
         ) : (
           <ul className="client-access-list">
             {clients.map((client) => {
@@ -257,7 +257,7 @@ export function ClientsAdmin() {
                           />
                           {!client.softwareId && (
                             <p className="banner banner-warn">
-                              Software collection missing for this client.
+                              Software Shared Folder missing for this client.
                             </p>
                           )}
                         </div>
@@ -274,7 +274,7 @@ export function ClientsAdmin() {
                           />
                           {!client.hardwareId && (
                             <p className="banner banner-warn">
-                              Hardware collection missing for this client.
+                              Hardware Shared Folder missing for this client.
                             </p>
                           )}
                         </div>

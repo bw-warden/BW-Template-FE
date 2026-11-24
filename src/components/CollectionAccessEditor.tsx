@@ -45,7 +45,7 @@ export function CollectionAccessEditor({
 
   function add(groupId: string) {
     if (!groupId || used.has(groupId)) return;
-    // Bitwarden admin UI defaults new collection assignments to Can edit.
+    // Bitwarden admin UI defaults new Shared Folder assignments to Can edit.
     onChange([...grants, { groupId, access: "edit" }]);
   }
 

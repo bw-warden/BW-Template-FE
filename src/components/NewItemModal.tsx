@@ -196,7 +196,7 @@ export function NewItemModal({
             <div className="modal-body">
             <fieldset className="modal-fields stack" disabled={saving}>
               <fieldset className="modal-section">
-                <legend className="modal-section-title">Collection</legend>
+                <legend className="modal-section-title">Shared Folder</legend>
                 <div className="target-toggle">
                   {(["software", "hardware"] as const).map((t) => (
                     <label

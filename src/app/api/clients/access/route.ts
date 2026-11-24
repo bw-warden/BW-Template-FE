@@ -1,11 +1,11 @@
-import { jsonError, jsonOk, withAdmin } from "@/lib/api";
+import { jsonError, jsonOk, jsonServerError, withAdmin } from "@/lib/api";
 import {
   listClientNodes,
   listCollections,
   listPublicCollections,
 } from "@/lib/bitwarden/public-api";
 import { fromBwGroupAccess } from "@/lib/collection-access";
-import { listCachedGroups } from "@/lib/db";
+import { getCachedGroupsPayload } from "@/lib/groups";
 import { loadSettings, settingsReady } from "@/lib/settings";
 
 export const runtime = "nodejs";
@@ -18,16 +18,18 @@ export async function GET() {
     }
 
     try {
-      const [named, publicCols, cachedGroups] = await Promise.all([
+      const [named, publicCols, groupsPayload] = await Promise.all([
         listCollections(settings!, { fresh: true }),
         listPublicCollections(settings!),
-        Promise.resolve(listCachedGroups()),
+        getCachedGroupsPayload(),
       ]);
 
       const accessById = new Map(
         publicCols.map((c) => [c.id, fromBwGroupAccess(c.groups)]),
       );
-      const groupNameById = new Map(cachedGroups.map((g) => [g.id, g.name]));
+      const groupNameById = new Map(
+        groupsPayload.groups.map((g) => [g.id, g.name]),
+      );
 
       const clients = listClientNodes(
         named,
@@ -64,7 +66,7 @@ export async function GET() {
         clients,
       });
     } catch (err) {
-      return jsonError(err instanceof Error ? err.message : String(err), 500);
+      return jsonServerError(err);
     }
   });
 }

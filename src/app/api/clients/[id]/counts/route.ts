@@ -1,4 +1,4 @@
-import { jsonError, jsonOk, withAuth } from "@/lib/api";
+import { jsonError, jsonOk, jsonServerError, withAuth } from "@/lib/api";
 import { findClientNode } from "@/lib/bitwarden/public-api";
 import { countItemsInCollection, syncNow } from "@/lib/bitwarden/vault";
 import { loadSettings, settingsReady } from "@/lib/settings";
@@ -26,7 +26,7 @@ export async function GET(
       ]);
       return jsonOk({ software, hardware });
     } catch (err) {
-      return jsonError(err instanceof Error ? err.message : String(err), 500);
+      return jsonServerError(err);
     }
   });
 }

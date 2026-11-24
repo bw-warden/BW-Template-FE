@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { jsonError, jsonOk, withAdmin } from "@/lib/api";
+import { jsonError, jsonOk, jsonServerError, withAdmin } from "@/lib/api";
 import {
   findClientNode,
   updateCollectionAccess,
@@ -47,13 +47,13 @@ export async function PUT(
       if (!client) return jsonError("Client not found", 404);
 
       if (!client.softwareId && !client.hardwareId) {
-        return jsonError("Software and Hardware collections are missing", 400);
+        return jsonError("Software and Hardware Shared Folders are missing", 400);
       }
       if (!client.softwareId) {
-        return jsonError("Software collection is missing for this client", 400);
+        return jsonError("Software Shared Folder is missing for this client", 400);
       }
       if (!client.hardwareId) {
-        return jsonError("Hardware collection is missing for this client", 400);
+        return jsonError("Hardware Shared Folder is missing for this client", 400);
       }
 
       await Promise.all([
@@ -78,7 +78,7 @@ export async function PUT(
         hardware: parsed.data.hardware,
       });
     } catch (err) {
-      return jsonError(err instanceof Error ? err.message : String(err), 500);
+      return jsonServerError(err);
     }
   });
 }

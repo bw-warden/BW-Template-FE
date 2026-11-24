@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { jsonError, jsonOk, withAuth } from "@/lib/api";
+import { jsonError, jsonOk, jsonServerError, withAuth } from "@/lib/api";
 import { findClientNode } from "@/lib/bitwarden/public-api";
 import {
   countItemsInCollection,
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
         parsed.data.target === "software" ? client.softwareId : client.hardwareId;
       if (!targetId) {
         return jsonError(
-          `${parsed.data.target} collection missing for this client. Re-create the client to repair it.`,
+          `${parsed.data.target} Shared Folder missing for this client. Re-create the client to repair it.`,
           400,
         );
       }
@@ -77,9 +77,10 @@ export async function POST(request: Request) {
       const count = await countItemsInCollection(settings, targetId);
       return jsonOk({ item: created, target: parsed.data.target, count });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const status = err instanceof RequiredFieldsError ? 400 : 500;
-      return jsonError(message, status);
+      if (err instanceof RequiredFieldsError) {
+        return jsonError(err.message, 400);
+      }
+      return jsonServerError(err);
     }
   });
 }

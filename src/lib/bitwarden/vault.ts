@@ -1,7 +1,6 @@
 import { ChildProcess, execFile, spawn } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
-import os from "os";
 import path from "path";
 import {
   BitwardenSettings,
@@ -100,8 +99,37 @@ function bwHome(): string {
   return home;
 }
 
-function bwEnv(homeDir: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  return { ...process.env, ...extra, HOME: homeDir, BW_NOINTERACTION: "1" };
+/**
+ * Minimal env for `bw` children — never pass APP_SECRET, REDIS_URL, or the
+ * rest of process.env (those would be readable via /proc/*/environ).
+ */
+function bwEnv(
+  homeDir: string,
+  extra: Record<string, string> = {},
+): NodeJS.ProcessEnv {
+  const allow = [
+    "PATH",
+    "PATHEXT",
+    "SystemRoot",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+  ] as const;
+  const env: NodeJS.ProcessEnv = {
+    HOME: homeDir,
+    BW_NOINTERACTION: "1",
+  };
+  for (const key of allow) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  for (const [key, value] of Object.entries(extra)) {
+    env[key] = value;
+  }
+  return env;
 }
 
 /** One-shot CLI process. Only used for login/unlock; everything else goes through `bw serve`. */
@@ -127,7 +155,10 @@ async function runBw(
       );
     }
     const detail = (e.stderr || e.message || String(err)).trim();
-    throw new Error(`bw ${args[0]} failed: ${detail}`);
+    // Log stderr server-side only — never put CLI output in thrown messages
+    // that may reach API clients (can contain paths or credential hints).
+    console.error(`[bw] ${args[0]} failed: ${detail.slice(0, 500)}`);
+    throw new Error(`Bitwarden CLI ${args[0]} failed`);
   }
 }
 
@@ -164,7 +195,10 @@ async function startServe(sessionKey: string, homeDir: string): Promise<ChildPro
   const started = Date.now();
   while (Date.now() - started < SERVE_READY_TIMEOUT_MS) {
     if (child.exitCode !== null) {
-      throw new Error(`bw serve exited during startup: ${stderr.trim() || child.exitCode}`);
+      console.error(
+        `[bw] serve exited during startup: ${(stderr || String(child.exitCode)).slice(0, 500)}`,
+      );
+      throw new Error("Bitwarden vault service failed to start");
     }
     try {
       const res = await fetch(`http://${SERVE_HOST}:${SERVE_PORT}/status`);
@@ -219,7 +253,10 @@ async function unlockVault(settings: BitwardenSettings): Promise<SessionState> {
     },
   });
 
-  const passwordFile = path.join(os.tmpdir(), `bw-mp-${process.pid}.txt`);
+  // Keep the master-password file under DATA_DIR (not OS temp), random name,
+  // mode 0600, and delete immediately after unlock.
+  const mpDir = fs.mkdtempSync(path.join(homeDir, ".mp-"));
+  const passwordFile = path.join(mpDir, "pw");
   fs.writeFileSync(passwordFile, settings.vaultMasterPassword, {
     encoding: "utf8",
     mode: 0o600,
@@ -232,7 +269,7 @@ async function unlockVault(settings: BitwardenSettings): Promise<SessionState> {
     });
   } finally {
     try {
-      fs.unlinkSync(passwordFile);
+      fs.rmSync(mpDir, { recursive: true, force: true });
     } catch {
       // ignore
     }
@@ -261,7 +298,13 @@ function serveRequest<T = unknown>(method: string, pathname: string, body?: unkn
     const payload = (await res.json().catch(() => ({}))) as ServeResponse<T>;
     console.log(`[bw] ${method} ${pathname.split("?")[0]} ${Date.now() - started}ms`);
     if (!res.ok || !payload.success) {
-      throw new Error(payload.message || `bw serve ${method} ${pathname} failed (${res.status})`);
+      const detail = payload.message || `status ${res.status}`;
+      console.error(`[bw] ${method} ${pathname.split("?")[0]} failed: ${detail}`);
+      // Keep a short stable message for session-retry detection; no upstream body.
+      const sessionHint = /locked|not logged in|unauthenticated/i.test(detail)
+        ? "locked"
+        : "failed";
+      throw new Error(`Bitwarden vault request ${sessionHint}`);
     }
     return payload.data as T;
   };
@@ -310,13 +353,17 @@ export async function testVaultConnection(
       "/status",
     );
     const status = data?.template?.status ?? "unknown";
-    return { ok: true, message: `Vault unlocked. Status: ${status}` };
+    return { ok: true, message: `Vault unlocked (${status})` };
   } catch (err) {
+    console.error(
+      "[bw] vault connection test failed:",
+      err instanceof Error ? err.message : err,
+    );
     await stopServe(globalState.__bwSession?.serve);
     globalState.__bwSession = null;
     return {
       ok: false,
-      message: err instanceof Error ? err.message : String(err),
+      message: "Vault connection failed",
     };
   }
 }
@@ -643,7 +690,7 @@ export async function createOrgCollection(
 ): Promise<OrgCollection> {
   if (!settings.orgId) throw new Error("Organization ID is required");
   const trimmed = name.trim();
-  if (!trimmed) throw new Error("Collection name is required");
+  if (!trimmed) throw new Error("Shared Folder name is required");
 
   // Omit `users` so the CLI grants this service account Can manage.
   // An explicit empty array would leave the collection with no manager.
@@ -672,7 +719,7 @@ export async function createOrgCollection(
     (c) => c.name.trim().toLowerCase() === trimmed.toLowerCase(),
   );
   if (!found) {
-    throw new Error(`Created collection "${trimmed}" but the CLI did not return its id`);
+    throw new Error(`Created Shared Folder "${trimmed}" but the CLI did not return its id`);
   }
   return found;
 }

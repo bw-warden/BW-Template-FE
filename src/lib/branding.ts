@@ -7,11 +7,11 @@ const META_PATH = path.join(BRANDING_DIR, "meta.json");
 
 export const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 
+/** Raster only — SVG is rejected to avoid stored XSS via scripted SVGs. */
 export const ALLOWED_LOGO_MIME: Record<string, string> = {
   "image/png": ".png",
   "image/jpeg": ".jpg",
   "image/webp": ".webp",
-  "image/svg+xml": ".svg",
 };
 
 export type BrandingMeta = {
@@ -29,9 +29,11 @@ export function getBrandingMeta(): BrandingMeta | null {
     if (!fs.existsSync(META_PATH)) return null;
     const raw = JSON.parse(fs.readFileSync(META_PATH, "utf8")) as BrandingMeta;
     if (!raw?.filename || !raw?.mimeType) return null;
-    const filePath = path.join(BRANDING_DIR, raw.filename);
+    // Ignore legacy SVG uploads (no longer allowed).
+    if (!ALLOWED_LOGO_MIME[raw.mimeType]) return null;
+    const filePath = path.join(BRANDING_DIR, path.basename(raw.filename));
     if (!fs.existsSync(filePath)) return null;
-    return raw;
+    return { ...raw, filename: path.basename(raw.filename) };
   } catch {
     return null;
   }

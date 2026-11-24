@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { jsonError, jsonOk, withAuth } from "@/lib/api";
+import { jsonError, jsonOk, jsonServerError, withAuth } from "@/lib/api";
 import {
   listClientNodes,
   listCollections,
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       const client = await provisionClient(settings!, parsed.data.name);
       return jsonOk({ client });
     } catch (err) {
-      return jsonError(err instanceof Error ? err.message : String(err), 500);
+      return jsonServerError(err);
     }
   });
 }

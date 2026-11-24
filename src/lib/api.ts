@@ -9,6 +9,20 @@ export function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
+/**
+ * Log the real error server-side; return a generic message to the client so
+ * Bitwarden/CLI/oauth stderr never leaks API keys or stack details.
+ */
+export function jsonServerError(
+  err: unknown,
+  fallback = "Something went wrong. Check server logs for details.",
+  status = 500,
+) {
+  const detail = err instanceof Error ? err.message : String(err);
+  console.error("[api]", detail);
+  return jsonError(fallback, status);
+}
+
 export async function withAuth<T>(
   handler: (user: AppUser) => Promise<T>,
 ): Promise<T | NextResponse> {

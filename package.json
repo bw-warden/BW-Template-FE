@@ -1,5 +1,5 @@
 {
-  "name": "bw-frontend",
+  "name": "bw-template-fe",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,6 +11,7 @@
   "dependencies": {
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^13.2.0",
+    "ioredis": "^6.1.0",
     "iron-session": "^9.1.0",
     "next": "15.5.29",
     "react": "19.1.0",

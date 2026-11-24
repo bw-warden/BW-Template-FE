@@ -12,10 +12,10 @@ type Masked = {
   region: "us" | "eu";
   orgId: string;
   orgApiClientId: string;
-  orgApiClientSecret: { configured: boolean; last4: string | null };
+  orgApiClientSecret: { configured: boolean };
   vaultApiClientId: string;
-  vaultApiClientSecret: { configured: boolean; last4: string | null };
-  vaultMasterPassword: { configured: boolean; last4: string | null };
+  vaultApiClientSecret: { configured: boolean };
+  vaultMasterPassword: { configured: boolean };
   clientsRootName: string;
   templatesRootName: string;
   softwareAccess: CollectionAccessGrant[];
@@ -283,7 +283,7 @@ export function SettingsForm() {
               value={form.orgApiClientSecret}
               placeholder={
                 masked?.orgApiClientSecret.configured
-                  ? `Configured ···${masked.orgApiClientSecret.last4}`
+                  ? "Configured (hidden)"
                   : "Paste to set / rotate"
               }
               onChange={(e) => setField("orgApiClientSecret", e.target.value)}
@@ -316,7 +316,7 @@ export function SettingsForm() {
               value={form.vaultApiClientSecret}
               placeholder={
                 masked?.vaultApiClientSecret.configured
-                  ? `Configured ···${masked.vaultApiClientSecret.last4}`
+                  ? "Configured (hidden)"
                   : "Paste to set / rotate"
               }
               onChange={(e) => setField("vaultApiClientSecret", e.target.value)}
@@ -331,7 +331,7 @@ export function SettingsForm() {
               value={form.vaultMasterPassword}
               placeholder={
                 masked?.vaultMasterPassword.configured
-                  ? `Configured ···${masked.vaultMasterPassword.last4}`
+                  ? "Configured (hidden)"
                   : "Paste to set / rotate"
               }
               onChange={(e) => setField("vaultMasterPassword", e.target.value)}
@@ -343,7 +343,7 @@ export function SettingsForm() {
 
       <div className="panel">
         <div className="panel-head">
-          <h2 className="panel-title">Default collection access</h2>
+          <h2 className="panel-title">Default Shared Folder access</h2>
           <div className="btn-row">
             <span className="muted">{formatSyncedAt(syncedAt)}</span>
             <button
@@ -357,9 +357,9 @@ export function SettingsForm() {
           </div>
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
-          Bitwarden collection permissions (Can view / Can view, except
+          Bitwarden Shared Folder permissions (Can view / Can view, except
           passwords / Can edit / Can manage). Applied when a new client&apos;s
-          Software or Hardware collection is created. Existing clients are
+          Software or Hardware Shared Folder is created. Existing clients are
           managed on the Clients tab.
         </p>
         <div className="access-editors">
@@ -381,7 +381,7 @@ export function SettingsForm() {
       </div>
 
       <div className="panel">
-        <h2 className="panel-title">Collection roots</h2>
+        <h2 className="panel-title">Shared Folder roots</h2>
         <div className="settings-grid two">
           <label className="label">
             Clients root name

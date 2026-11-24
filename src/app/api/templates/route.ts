@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { jsonError, jsonOk, withAdmin, withAuth } from "@/lib/api";
+import { jsonError, jsonOk, jsonServerError, withAdmin, withAuth } from "@/lib/api";
 import {
   createTemplateItem,
   listItemsInCollection,
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
         templates: items.map(toSafeTemplate),
       });
     } catch (err) {
-      return jsonError(err instanceof Error ? err.message : String(err), 500);
+      return jsonServerError(err);
     }
   });
 }
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
       });
       return jsonOk({ template: toSafeTemplate(created) });
     } catch (err) {
-      return jsonError(err instanceof Error ? err.message : String(err), 500);
+      return jsonServerError(err);
     }
   });
 }

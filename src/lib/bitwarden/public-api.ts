@@ -7,6 +7,11 @@ import {
   toBwGroupAccess,
 } from "@/lib/collection-access";
 import {
+  getCachedOrgToken,
+  orgTokenKey,
+  setCachedOrgToken,
+} from "@/lib/redis";
+import {
   BitwardenSettings,
   getRegionUrls,
 } from "@/lib/settings";
@@ -30,13 +35,26 @@ export type BwGroup = {
 };
 
 type TokenCache = { token: string; expiresAt: number };
+/** Process-local L1 cache — hot path avoids a Redis round-trip. */
 const tokenCache = new Map<string, TokenCache>();
+
+function tokenStillValid(cached: TokenCache): boolean {
+  return cached.expiresAt > Date.now() + 60_000;
+}
 
 async function getOrgToken(settings: BitwardenSettings): Promise<string> {
   const cacheKey = `${settings.region}:${settings.orgApiClientId}`;
-  const cached = tokenCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now() + 60_000) {
-    return cached.token;
+  const redisKey = orgTokenKey(settings.region, settings.orgApiClientId);
+
+  const l1 = tokenCache.get(cacheKey);
+  if (l1 && tokenStillValid(l1)) {
+    return l1.token;
+  }
+
+  const fromRedis = await getCachedOrgToken(redisKey);
+  if (fromRedis && tokenStillValid(fromRedis)) {
+    tokenCache.set(cacheKey, fromRedis);
+    return fromRedis.token;
   }
 
   const urls = getRegionUrls(settings.region);
@@ -55,18 +73,30 @@ async function getOrgToken(settings: BitwardenSettings): Promise<string> {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Org API token failed (${res.status}): ${text}`);
+    console.error(
+      `[org-api] token failed (${res.status}): ${text.slice(0, 300)}`,
+    );
+    throw new Error("Organization API authentication failed");
   }
 
   const data = (await res.json()) as {
     access_token: string;
     expires_in: number;
   };
-  tokenCache.set(cacheKey, {
+  const entry: TokenCache = {
     token: data.access_token,
     expiresAt: Date.now() + data.expires_in * 1000,
-  });
-  return data.access_token;
+  };
+  tokenCache.set(cacheKey, entry);
+
+  // TTL matches usable lifetime (minus the same 60s skew used for reads).
+  const ttlSeconds = Math.max(
+    1,
+    Math.floor((entry.expiresAt - Date.now() - 60_000) / 1000),
+  );
+  void setCachedOrgToken(redisKey, entry, ttlSeconds);
+
+  return entry.token;
 }
 
 async function apiFetch<T>(
@@ -87,11 +117,10 @@ async function apiFetch<T>(
 
   if (!res.ok) {
     const text = (await res.text()).trim();
-    throw new Error(
-      text
-        ? `Bitwarden Public API ${path} failed (${res.status}): ${text}`
-        : `Bitwarden Public API ${path} failed (${res.status})`,
+    console.error(
+      `[org-api] ${path} failed (${res.status}): ${text.slice(0, 300)}`,
     );
+    throw new Error("Bitwarden organization API request failed");
   }
 
   if (res.status === 204) return undefined as T;
@@ -188,12 +217,16 @@ export async function testOrgConnection(
     const collections = await listPublicCollections(settings);
     return {
       ok: true,
-      message: `Organization API token and collections list OK (${collections.length} collections)`,
+      message: `Organization API OK (${collections.length} Shared Folders)`,
     };
   } catch (err) {
+    console.error(
+      "[org-api] connection test failed:",
+      err instanceof Error ? err.message : err,
+    );
     return {
       ok: false,
-      message: err instanceof Error ? err.message : String(err),
+      message: "Organization API connection failed",
     };
   }
 }

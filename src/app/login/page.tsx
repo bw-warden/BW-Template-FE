@@ -64,7 +64,7 @@ export default function LoginPage() {
       <div className="auth-panel">
         <div className="auth-brand">
           <BrandLogo height={36} />
-          <div className="brand-sub">BW FrontEnd</div>
+          <div className="brand-sub">BW-Template-FE</div>
         </div>
         <h1 className="auth-title">Sign in</h1>
         <form className="stack" onSubmit={onSubmit}>

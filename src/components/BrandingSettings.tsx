@@ -78,7 +78,7 @@ export function BrandingSettings() {
         <h2 className="section-title">Branding</h2>
         <p className="muted">
           Optional organization logo for the header and sign-in screens. PNG,
-          JPEG, WebP, or SVG up to 2MB. The Bitwarden footer logo is unchanged.
+          JPEG, or WebP up to 2MB. The Bitwarden footer logo is unchanged.
         </p>
       </div>
       {error && <div className="banner banner-error">{error}</div>}
@@ -104,7 +104,7 @@ export function BrandingSettings() {
             <input
               ref={inputRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              accept="image/png,image/jpeg,image/webp"
               disabled={busy}
               onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
             />

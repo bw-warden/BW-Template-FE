@@ -65,7 +65,7 @@ export default function SetupPage() {
       <div className="auth-panel">
         <div className="auth-brand">
           <BrandLogo height={36} />
-          <div className="brand-sub">BW FrontEnd</div>
+          <div className="brand-sub">BW-Template-FE</div>
         </div>
         <p className="auth-kicker">First load</p>
         <h1 className="auth-title">Create admin</h1>

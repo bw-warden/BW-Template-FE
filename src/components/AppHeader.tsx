@@ -36,7 +36,7 @@ export function AppHeader({
     <header className="site-header">
       <div className="brand">
         <BrandLogo height={36} />
-        <div className="brand-sub">BW FrontEnd — client template provisioner</div>
+        <div className="brand-sub">BW-Template-FE — client template provisioner</div>
       </div>
       <nav className="nav-links" aria-label="Primary">
         {links.map((l) => (

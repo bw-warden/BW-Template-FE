@@ -5,6 +5,7 @@ import {
   listCachedGroups,
   replaceCachedGroups,
 } from "@/lib/db";
+import { getCachedGroups, setCachedGroups } from "@/lib/redis";
 import { loadSettings, settingsReady } from "@/lib/settings";
 
 export type GroupsPayload = {
@@ -12,11 +13,28 @@ export type GroupsPayload = {
   syncedAt: string | null;
 };
 
-export function getCachedGroupsPayload(): GroupsPayload {
+function sqliteGroupsPayload(): GroupsPayload {
   return {
     groups: listCachedGroups(),
     syncedAt: getGroupsSyncedAt(),
   };
+}
+
+/** Redis first, then SQLite; backfill Redis on SQLite hit when configured. */
+export async function getCachedGroupsPayload(): Promise<GroupsPayload> {
+  const fromRedis = await getCachedGroups();
+  if (fromRedis) {
+    return {
+      groups: fromRedis.groups,
+      syncedAt: fromRedis.syncedAt,
+    };
+  }
+
+  const fromSqlite = sqliteGroupsPayload();
+  if (fromSqlite.groups.length > 0 || fromSqlite.syncedAt) {
+    void setCachedGroups(fromSqlite);
+  }
+  return fromSqlite;
 }
 
 export async function refreshGroupsFromBitwarden(): Promise<GroupsPayload> {
@@ -26,10 +44,12 @@ export async function refreshGroupsFromBitwarden(): Promise<GroupsPayload> {
   }
   const remote = await listGroups(settings!);
   const groups = replaceCachedGroups(remote);
-  return {
+  const payload: GroupsPayload = {
     groups,
     syncedAt: getGroupsSyncedAt(),
   };
+  void setCachedGroups(payload);
+  return payload;
 }
 
 /** Fire-and-forget sync after login; never throws to the caller. */

@@ -1,12 +1,12 @@
-# Welcome to BW FrontEnd!
+# Welcome to BW-Template-FE!
 
-Here you will find a self-hosted **Bitwarden client template provisioner** you can run in your own Docker environment and network. It is meant as a jumping-off point for provisioning nested client collections and cloning admin-managed Templates into Software/Hardware collections using the [Bitwarden CLI](https://bitwarden.com/help/cli/) and [APIs](https://bitwarden.com/help/bitwarden-apis/).
+Here you will find a self-hosted **Bitwarden client template provisioner** you can run in your own Docker environment and network. It is meant as a jumping-off point for provisioning nested client Shared Folders and cloning admin-managed Templates into Software/Hardware Shared Folders using the [Bitwarden CLI](https://bitwarden.com/help/cli/) and [APIs](https://bitwarden.com/help/bitwarden-apis/). (Bitwarden’s UI calls these Shared Folders; the API still uses the collections resource.)
 
 ***Important things to note:***
 
-- BW FrontEnd is a **self-hosted example / framework**. Review and adapt it for your org before relying on it in production
+- BW-Template-FE is a **self-hosted example / framework**. Review and adapt it for your org before relying on it in production
 - There is **no Bitwarden user login** in the app. Operators use a local admin/member account; Bitwarden org + vault credentials are stored encrypted server-side
-- Requires a Bitwarden **Enterprise** Cloud org with **nested collections** enabled
+- Requires a Bitwarden **Enterprise** Cloud org with **nested Shared Folders** enabled
 - Run it with Docker on your own host or internal network. How you expose it (LAN only, reverse proxy, HTTPS, etc.) is up to your organization
 - Never commit real `.env` files or `./data` — generate a unique `APP_SECRET` (32+ characters) per deployment
 
@@ -15,14 +15,14 @@ Here you will find a self-hosted **Bitwarden client template provisioner** you c
 [Vault Management API Reference](https://bitwarden.com/help/vault-management-api/)<br>
 [Bitwarden Public API Reference](https://bitwarden.com/help/api/)<br>
 [Guide to using Postman to access the Bitwarden API](https://community.bitwarden.com/t/guide-to-using-postman-to-access-the-bitwarden-api/56475)<br>
-[Nested collections](https://bitwarden.com/help/nested-collections/)
+[Nested collections](https://bitwarden.com/help/nested-collections/) (Shared Folders in the Bitwarden UI)
 
 ## What it does
 
-1. Creates nested client collections (`Clients/{Name}/Software` and `…/Hardware`)
-2. Clones admin-managed **Templates** items into those collections as **new** vault items (Templates are never shared into client collections)
+1. Creates nested client Shared Folders (`Clients/{Name}/Software` and `…/Hardware`)
+2. Clones admin-managed **Templates** items into those Shared Folders as **new** vault items (Templates are never shared into client Shared Folders)
 3. Offers typeahead lookup of existing clients for later adds
-4. Applies admin-configured Bitwarden **group** View/Edit access on new Software/Hardware collections
+4. Applies admin-configured Bitwarden **group** View/Edit access on new Software/Hardware Shared Folders
 5. Lets an admin upload an optional organization logo (**Settings → Branding**) for header / login / setup; the Bitwarden footer logo remains
 
 ## Getting started (Docker)
@@ -36,7 +36,7 @@ Here you will find a self-hosted **Bitwarden client template provisioner** you c
 cp .env.example .env
 ```
 
-Edit `.env` and set `APP_SECRET` to a long random string (32+ characters). Do not reuse the example value.
+Edit `.env` and set `APP_SECRET` and `REDIS_PASSWORD` to long random strings (32+ characters for `APP_SECRET`). Do not reuse the example values.
 
 3. Build and start:
 
@@ -47,7 +47,7 @@ docker compose up -d --build
 4. Open http://localhost:3000 (or `http://<host>:3000` on your network)
 5. Complete **Create admin** on first load (`/setup`), then configure Bitwarden under **Settings**
 
-Data (SQLite + Bitwarden CLI home + uploaded branding) persists in `./data` on the host (gitignored). Stop with `docker compose down`; data remains unless you delete `./data`.
+Data (SQLite + Bitwarden CLI home + uploaded branding) persists in `./data` on the host (gitignored). Stop with `docker compose down`; data remains unless you delete `./data`. Compose also starts a Redis cache (org API tokens + shared groups snapshot); users and AES-encrypted Bitwarden settings stay in SQLite.
 
 If you terminate TLS in front of the app (recommended for anything beyond local use), set `COOKIE_SECURE=true` in `.env` and recreate the container.
 
@@ -59,6 +59,8 @@ If you terminate TLS in front of the app (recommended for anything beyond local 
 | `CREDENTIALS_KEY` | No | Alias used if `APP_SECRET` is unset |
 | `COOKIE_SECURE` | No | Set `true` when serving over HTTPS |
 | `DATA_DIR` | No | Defaults to `/app/data` in Docker |
+| `REDIS_PASSWORD` | Yes (Compose) | Password for the Compose `redis` service; app gets `REDIS_URL` built from it |
+| `REDIS_URL` | No (local) | Optional Redis URL for `npm run dev`. Unset = in-memory token cache + SQLite groups only |
 
 ## First-load setup
 
@@ -72,18 +74,18 @@ If you terminate TLS in front of the app (recommended for anything beyond local 
 ## Bitwarden org prerequisites
 
 1. Create the groups you need in Bitwarden (for example Operators, Admins, or any custom groups)
-2. Seed root collections (or let the app create them by name):
+2. Seed root Shared Folders (or let the app create them by name):
    - `Clients`
    - `Templates` (service account / admins only — do not grant broad operator access here)
 3. Create an **Organization API key** (Public API)
-4. Create a **service account** user with vault access to `Templates` and ability to create items in client Software/Hardware collections. Generate that user’s **personal API key** + master password
-5. In **Settings → Default collection access**, refresh groups and assign permissions per group for Software and Hardware. Those presets apply when a **new** client’s nested collections are created
+4. Create a **service account** user with vault access to `Templates` and ability to create items in client Software/Hardware Shared Folders. Generate that user’s **personal API key** + master password
+5. In **Settings → Default Shared Folder access**, refresh groups and assign permissions per group for Software and Hardware. Those presets apply when a **new** client’s nested Shared Folders are created
 
 ## Product flows
 
 1. **Provision** (`/`): Client typeahead → select/create → multi-select templates → Software/Hardware → confirm → result
-2. **Clients** (`/clients`, admin): list client collections and edit live Software/Hardware group permissions
-3. **Templates** (`/templates`): create/delete template field shapes in the Templates collection
+2. **Clients** (`/clients`, admin): list client Shared Folders and edit live Software/Hardware group permissions
+3. **Templates** (`/templates`): create/delete template field shapes in the Templates Shared Folder
 4. **Users** (`/users`): manage local admin/member accounts
 5. **Settings** (`/settings`): branding logo + Bitwarden connection
 
@@ -98,10 +100,35 @@ npm run dev
 
 ## Stack
 
-- Next.js (App Router) + TypeScript + Tailwind
-- SQLite (`better-sqlite3`)
-- Bitwarden Public API for groups / collection access
-- Bitwarden CLI (`bw`) in the Docker image for vault unlock / item create
+Feel free to swap pieces that fit your environment; the notes below reflect what this repo ships with today.
+
+| Layer | Choice | Notes |
+|---|---|---|
+| App framework | **Next.js 15** (App Router) | `output: "standalone"` for Docker; API routes under `src/app/api` |
+| Language | **TypeScript 5** | Strict project via `tsconfig.json` |
+| UI | **React 19** + **Tailwind CSS 4** | Server/client components; PostCSS via `@tailwindcss/postcss` |
+| Validation | **Zod 4** | Request bodies and settings payloads |
+| Local DB | **SQLite** via `better-sqlite3` | File at `$DATA_DIR/app.db` (WAL mode); users, AES-encrypted settings, durable groups cache |
+| Shared cache | **Redis 7** (`ioredis`) | AES-encrypted org API OAuth tokens + groups snapshot; optional via `REDIS_URL`; fail-open to memory/SQLite |
+| Sessions | **iron-session** | Cookie `bw_template_fe_session`; sealed with `APP_SECRET` |
+| Password hashing | **bcrypt** | Local admin/member accounts only (not Bitwarden login) |
+| Secrets at rest | **AES-256-GCM** (Node `crypto`) | Bitwarden API keys / master password encrypted with key derived from `APP_SECRET` (SQLite only — not stored in Redis) |
+| Bitwarden org API | **Public API** (HTTP) | Groups, Shared Folder (collection) create + access |
+| Bitwarden vault | **CLI `bw`** | Unlock + item create; image pins `cli-v2025.12.1` |
+| Runtime | **Node.js 22** | Docker base: `node:22-bookworm-slim` |
+| Packaging | **Docker Compose** | `app` + `redis`, port `3000`, volume `./data` |
+| Optional edge | **cloudflared** (example config) | Tunnel / TLS in front of the app if you want it |
+
+**Out of scope / not in this stack:** Bitwarden user SSO in the UI, a separate Postgres/MySQL store, Redis as primary DB (cache only), or a reverse proxy baked into Compose (bring your own).
+
+## Security notes
+
+- **Bitwarden API keys and vault master password** are encrypted at rest in SQLite with AES-256-GCM (key derived from `APP_SECRET`). Settings APIs never return secret values — only a “configured” flag.
+- **Org API OAuth tokens** cached in Redis are AES-256-GCM encrypted with the same key (not plaintext). Groups cache is non-secret metadata only.
+- **Sessions** are httpOnly iron-session cookies (8h TTL). Set `COOKIE_SECURE=true` behind HTTPS.
+- **`bw` CLI children** receive a minimal environment (no `APP_SECRET` / `REDIS_URL`). Treat `$DATA_DIR/bw-home` as sensitive.
+- **Login** is rate-limited per IP and email. API errors to the browser are generic; details stay in server logs.
+- Generate unique `APP_SECRET` and `REDIS_PASSWORD` per deployment; never reuse `.env.example` placeholders.
 
 ## Disclaimer
 

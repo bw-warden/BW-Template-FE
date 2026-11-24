@@ -21,8 +21,8 @@
   --warn-soft: #fffaeb;
   --shadow: 0 8px 28px rgba(0, 26, 77, 0.08);
   --radius: 2px;
-  --font-display: var(--font-display);
-  --font-body: var(--font-body);
+  --font-display: "Montserrat", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-body: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 @theme inline {

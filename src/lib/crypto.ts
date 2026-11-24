@@ -1,13 +1,31 @@
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from "crypto";
 
-function getKey(): Buffer {
+const PLACEHOLDER_SECRETS = new Set([
+  "change-me-to-a-long-random-string",
+  "change-me",
+  "changeme",
+  "secret",
+  "password",
+]);
+
+/** Resolves APP_SECRET / CREDENTIALS_KEY and enforces production-safe length. */
+export function requireAppSecret(): string {
   const secret = process.env.APP_SECRET || process.env.CREDENTIALS_KEY;
-  if (!secret || secret.length < 16) {
+  if (!secret || secret.length < 32) {
     throw new Error(
-      "APP_SECRET (or CREDENTIALS_KEY) must be set to a string of at least 16 characters",
+      "APP_SECRET (or CREDENTIALS_KEY) must be set to a string of at least 32 characters",
     );
   }
-  return createHash("sha256").update(secret).digest();
+  if (PLACEHOLDER_SECRETS.has(secret.trim().toLowerCase())) {
+    throw new Error(
+      "APP_SECRET must not use the example placeholder — generate a unique random value",
+    );
+  }
+  return secret;
+}
+
+function getKey(): Buffer {
+  return createHash("sha256").update(requireAppSecret()).digest();
 }
 
 /** Encrypt plaintext to `iv:tag:ciphertext` (base64 parts). */
@@ -44,11 +62,9 @@ export function decryptSecret(payload: string): string {
   return decrypted.toString("utf8");
 }
 
+/** Whether a secret is stored — never returns any characters of the value. */
 export function maskSecret(value: string | null | undefined): {
   configured: boolean;
-  last4: string | null;
 } {
-  if (!value) return { configured: false, last4: null };
-  const last4 = value.length <= 4 ? "****" : value.slice(-4);
-  return { configured: true, last4 };
+  return { configured: Boolean(value) };
 }

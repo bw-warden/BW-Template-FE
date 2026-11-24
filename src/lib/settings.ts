@@ -169,10 +169,10 @@ export type MaskedSettings = {
   region: "us" | "eu";
   orgId: string;
   orgApiClientId: string;
-  orgApiClientSecret: { configured: boolean; last4: string | null };
+  orgApiClientSecret: { configured: boolean };
   vaultApiClientId: string;
-  vaultApiClientSecret: { configured: boolean; last4: string | null };
-  vaultMasterPassword: { configured: boolean; last4: string | null };
+  vaultApiClientSecret: { configured: boolean };
+  vaultMasterPassword: { configured: boolean };
   operatorsGroupId: string;
   adminsGroupId: string;
   clientsRootName: string;
@@ -190,10 +190,10 @@ export function toMaskedSettings(
       region: "us",
       orgId: "",
       orgApiClientId: "",
-      orgApiClientSecret: { configured: false, last4: null },
+      orgApiClientSecret: { configured: false },
       vaultApiClientId: "",
-      vaultApiClientSecret: { configured: false, last4: null },
-      vaultMasterPassword: { configured: false, last4: null },
+      vaultApiClientSecret: { configured: false },
+      vaultMasterPassword: { configured: false },
       operatorsGroupId: "",
       adminsGroupId: "",
       clientsRootName: "Clients",

@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     const mimeType = file.type;
     if (!ALLOWED_LOGO_MIME[mimeType]) {
       return jsonError(
-        "Unsupported type. Use PNG, JPEG, WebP, or SVG.",
+        "Unsupported type. Use PNG, JPEG, or WebP.",
       );
     }
     if (file.size > LOGO_MAX_BYTES) {
