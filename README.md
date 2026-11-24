@@ -1,12 +1,12 @@
 # Welcome to BW-Template-FE!
 
-Here you will find a self-hosted **Bitwarden client template provisioner** you can run in your own Docker environment and network. It is meant as a jumping-off point for provisioning nested client Shared Folders and cloning admin-managed Templates into Software/Hardware Shared Folders using the [Bitwarden CLI](https://bitwarden.com/help/cli/) and [APIs](https://bitwarden.com/help/bitwarden-apis/). (Bitwarden’s UI calls these Shared Folders; the API still uses the collections resource.)
+Here you will find a self-hosted **Bitwarden client template provisioner** you can run in your own Docker environment and network. It is meant as a jumping-off point for provisioning nested client Shared Folders and cloning admin-managed Templates into Shared Folders using the [Bitwarden CLI](https://bitwarden.com/help/cli/) and [APIs](https://bitwarden.com/help/bitwarden-apis/). (Bitwarden’s UI calls these Shared Folders; the API still uses the collections resource.)
 
 ***Important things to note:***
 
 - BW-Template-FE is a **self-hosted example / framework**. Review and adapt it for your org before relying on it in production
 - There is **no Bitwarden user login** in the app. Operators use a local admin/member account; Bitwarden org + vault credentials are stored encrypted server-side
-- Requires a Bitwarden **Enterprise** Cloud org with **nested Shared Folders** enabled
+- Requires a Bitwarden **Enterprise** Cloud org
 - Run it with Docker on your own host or internal network. How you expose it (LAN only, reverse proxy, HTTPS, etc.) is up to your organization
 - Never commit real `.env` files or `./data` — generate a unique `APP_SECRET` (32+ characters) and `REDIS_PASSWORD` per deployment. Do not copy someone else’s `./data` or `.env` into a fork
 
@@ -19,7 +19,7 @@ Here you will find a self-hosted **Bitwarden client template provisioner** you c
 
 ## What it does
 
-1. Creates nested client Shared Folders (`Clients/{Name}/Software` and `…/Hardware`)
+1. Creates nested client Shared Folders eg: (`Clients/{Name}/Software` and `…/Hardware`)
 2. Clones admin-managed **Templates** items into those Shared Folders as **new** vault items (Templates are never shared into client Shared Folders)
 3. Offers typeahead lookup of existing clients for later adds
 4. Applies admin-configured Bitwarden **group** View/Edit access on new Software/Hardware Shared Folders
