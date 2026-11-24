@@ -9,7 +9,7 @@ export async function templatesCollection(): Promise<{
   settings: BitwardenSettings;
   collectionId: string;
 }> {
-  const settings = loadSettings();
+  const settings = await loadSettings();
   if (!settingsReady(settings)) {
     throw new Error("Bitwarden settings not configured");
   }

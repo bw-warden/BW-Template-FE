@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     return jsonError("Too many login attempts. Try again later.", 429);
   }
 
-  const user = findUserByEmail(parsed.data.email);
+  const user = await findUserByEmail(parsed.data.email);
   // Constant-ish failure path: always run a bcrypt compare when user missing
   // so timing does not reveal whether the email exists.
   // Precomputed bcrypt of a throwaway string — used only so missing users

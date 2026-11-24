@@ -105,8 +105,8 @@ export function getRegionUrls(region: "us" | "eu") {
   };
 }
 
-export function loadSettings(): BitwardenSettings | null {
-  const enc = getSettingsPayloadEnc();
+export async function loadSettings(): Promise<BitwardenSettings | null> {
+  const enc = await getSettingsPayloadEnc();
   if (!enc) return null;
   try {
     const json = decryptSecret(enc);
@@ -117,8 +117,8 @@ export function loadSettings(): BitwardenSettings | null {
   }
 }
 
-export function saveSettings(settings: BitwardenSettings): void {
-  upsertSettingsPayloadEnc(encryptSecret(JSON.stringify(settings)));
+export async function saveSettings(settings: BitwardenSettings): Promise<void> {
+  await upsertSettingsPayloadEnc(encryptSecret(JSON.stringify(settings)));
 }
 
 export function mergeSettingsUpdate(

@@ -42,7 +42,7 @@ export async function getSession() {
 export async function getCurrentUser(): Promise<AppUser | null> {
   const session = await getSession();
   if (!session.isLoggedIn || !session.userId) return null;
-  const user = findUserById(session.userId);
+  const user = await findUserById(session.userId);
   if (!user) return null;
   return { id: user.id, email: user.email, role: user.role };
 }

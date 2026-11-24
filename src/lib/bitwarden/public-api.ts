@@ -10,7 +10,7 @@ import {
   getCachedOrgToken,
   orgTokenKey,
   setCachedOrgToken,
-} from "@/lib/redis";
+} from "@/lib/db";
 import {
   BitwardenSettings,
   getRegionUrls,

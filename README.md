@@ -48,21 +48,23 @@ docker compose up -d --build
 
 4. Open http://localhost:3000 (or `http://<host>:3000` on your network)
 5. Complete **Create admin** on first load (`/setup`) — that account is the first (and initially only) admin
-6. Configure Bitwarden under **Settings** (org API key, vault service account, groups). Keys are entered in the UI and stored encrypted in SQLite — never committed
+6. Configure Bitwarden under **Settings** (org API key, vault service account, groups). Keys are entered in the UI, AES-encrypted in Redis — never committed
 
-### Redis (Compose)
+### Redis (required)
 
-Compose starts a Redis 7 service on the internal Docker network only (port **not** published to the host). The app receives `REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379`.
+**Redis is the application database.** Compose starts Redis 7 with AOF persistence on `./data/redis` (internal Docker network only — port not published to the host). The app requires `REDIS_URL` (Compose injects `redis://:${REDIS_PASSWORD}@redis:6379`).
 
-| What Redis stores | What stays in SQLite |
+| Stored in Redis | Stored under `./data` (files) |
 |---|---|
-| Shared cache: AES-256-GCM–encrypted org API OAuth tokens + groups snapshot | Local users, AES-encrypted Bitwarden settings, durable groups copy |
+| Users, AES-encrypted Bitwarden settings, groups, AES-encrypted org API OAuth tokens | Bitwarden CLI home (`bw-home`), uploaded branding |
 
-If Redis is unavailable, the app **fails open**: in-memory token cache + SQLite groups. Users and Bitwarden secrets are never written to Redis as plaintext.
+The app will not start without Redis. Org OAuth tokens and Bitwarden secrets are never stored as plaintext in Redis.
+
+If a legacy `./data/app.db` is present on first boot, the app imports users/settings/groups into Redis once, then renames the old file to `app.db.migrated`.
 
 ### Data and reset
 
-Runtime data (SQLite + Bitwarden CLI home + uploaded branding) persists in `./data` on the host (gitignored). Stop with `docker compose down`; data remains unless you delete `./data`.
+Redis AOF (`./data/redis`) + CLI home + branding persist under `./data` (gitignored). Stop with `docker compose down`; data remains unless you delete `./data`.
 
 To return to a blank first-run (re-opens `/setup`):
 
@@ -79,21 +81,21 @@ If you terminate TLS in front of the app (recommended for anything beyond local 
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `APP_SECRET` | Yes | Session cookie password + AES key for Bitwarden secrets and Redis-cached org tokens (min 32 chars). Generate a unique value per deployment. |
+| `APP_SECRET` | Yes | Session cookie password + AES key for Bitwarden secrets and org tokens in Redis (min 32 chars) |
 | `CREDENTIALS_KEY` | No | Alias used if `APP_SECRET` is unset |
 | `COOKIE_SECURE` | No | Set `true` when serving over HTTPS |
-| `DATA_DIR` | No | Defaults to `/app/data` in Docker |
-| `REDIS_PASSWORD` | Yes (Compose) | Password for the Compose `redis` service; required — Compose injects `REDIS_URL` from it |
-| `REDIS_URL` | No (local) | Optional full Redis URL for `npm run dev`. Leave unset to skip Redis and use in-memory token cache + SQLite groups only |
+| `DATA_DIR` | No | Defaults to `/app/data` in Docker (CLI home + branding) |
+| `REDIS_PASSWORD` | Yes (Compose) | Password for the Compose `redis` service; Compose injects `REDIS_URL` from it |
+| `REDIS_URL` | Yes | Redis connection URL (required for app + local `npm run dev`) |
 
 ## First-load setup
 
-1. Empty DB → **Create admin** (`/setup`) with email + password (first user is always admin)
+1. Empty Redis → **Create admin** (`/setup`) with email + password (first user is always admin)
 2. Setup locks once any user exists
 3. Thereafter every page/API requires session login (`/login`)
 4. **Settings → Branding**: optional organization logo
 5. **Settings**: region, org id, Organization API key, vault service account API key + master password, default Software/Hardware group access, Refresh groups, Test connection
-6. On login (when Bitwarden settings are ready), org **groups** are synced into SQLite in the background (and into Redis when configured)
+6. On login (when Bitwarden settings are ready), org **groups** are synced into Redis in the background
 
 ## Bitwarden org prerequisites
 
@@ -119,10 +121,11 @@ If you terminate TLS in front of the app (recommended for anything beyond local 
 cp .env.example .env
 npm install
 # install Bitwarden CLI (`bw`) on PATH
+# start Redis (e.g. docker compose up -d redis) and set REDIS_URL in .env
 npm run dev
 ```
 
-Set `APP_SECRET` in `.env`. Redis is optional for local dev: leave `REDIS_URL` unset unless you run Redis yourself (Compose already wires Redis for Docker).
+`APP_SECRET` and `REDIS_URL` are required.
 
 ## Stack
 
@@ -134,23 +137,22 @@ Feel free to swap pieces that fit your environment; the notes below reflect what
 | Language | **TypeScript 5** | Strict project via `tsconfig.json` |
 | UI | **React 19** + **Tailwind CSS 4** | Server/client components; PostCSS via `@tailwindcss/postcss` |
 | Validation | **Zod 4** | Request bodies and settings payloads |
-| Local DB | **SQLite** via `better-sqlite3` | File at `$DATA_DIR/app.db` (WAL mode); users, AES-encrypted settings, durable groups cache |
-| Shared cache | **Redis 7** (`ioredis`) | Compose service (internal only); AES-encrypted org API OAuth tokens + groups snapshot; fail-open to memory/SQLite |
+| Data store | **Redis 7** (`ioredis`) | Users, AES-encrypted settings, groups, AES-encrypted org tokens; AOF volume `./data/redis` |
 | Sessions | **iron-session** | Cookie `bw_template_fe_session`; sealed with `APP_SECRET` |
 | Password hashing | **bcrypt** | Local admin/member accounts only (not Bitwarden login) |
-| Secrets at rest | **AES-256-GCM** (Node `crypto`) | Bitwarden API keys / master password in SQLite; org OAuth tokens in Redis use the same key |
+| Secrets at rest | **AES-256-GCM** (Node `crypto`) | Bitwarden API keys / master password and org OAuth tokens in Redis |
 | Bitwarden org API | **Public API** (HTTP) | Groups, Shared Folder (collection) create + access |
 | Bitwarden vault | **CLI `bw`** | Unlock + item create; image pins `cli-v2025.12.1` |
 | Runtime | **Node.js 22** | Docker base: `node:22-bookworm-slim` |
 | Packaging | **Docker Compose** | `app` + `redis`, port `3000`, volume `./data` |
 | Optional edge | Bring your own | Terminate TLS / tunnel (e.g. cloudflared) in front of the app if you want it |
 
-**Out of scope / not in this stack:** Bitwarden user SSO in the UI, a separate Postgres/MySQL store, Redis as primary DB (cache only), or a reverse proxy baked into Compose (bring your own).
+**Out of scope / not in this stack:** Bitwarden user SSO in the UI, or a reverse proxy baked into Compose (bring your own).
 
 ## Security notes
 
-- **Bitwarden API keys and vault master password** are encrypted at rest in SQLite with AES-256-GCM (key derived from `APP_SECRET`). Settings APIs never return secret values — only a “configured” flag.
-- **Org API OAuth tokens** cached in Redis are AES-256-GCM encrypted with the same key (not plaintext). Groups cache is non-secret metadata only.
+- **Bitwarden API keys and vault master password** are AES-256-GCM encrypted in Redis (key derived from `APP_SECRET`). Settings APIs never return secret values — only a “configured” flag.
+- **Org API OAuth tokens** in Redis use the same encryption (not plaintext).
 - **Sessions** are httpOnly iron-session cookies (8h TTL). Set `COOKIE_SECURE=true` behind HTTPS.
 - **`bw` CLI children** receive a minimal environment (no `APP_SECRET` / `REDIS_URL`). Treat `$DATA_DIR/bw-home` as sensitive.
 - **Login and first-time setup** are rate-limited per IP (and email). API errors to the browser are generic; details stay in server logs.

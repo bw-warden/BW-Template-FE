@@ -22,7 +22,7 @@ export async function PUT(
   context: { params: Promise<{ id: string }> },
 ) {
   return withAdmin(async () => {
-    const settings = loadSettings();
+    const settings = await loadSettings();
     if (!settingsReady(settings)) {
       return jsonError("Bitwarden settings not configured", 400);
     }

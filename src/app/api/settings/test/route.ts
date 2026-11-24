@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 export async function POST() {
   return withAdmin(async () => {
-    const settings = loadSettings();
+    const settings = await loadSettings();
     if (!settingsReady(settings)) {
       return jsonError(
         "Settings incomplete — save org API and vault credentials first",

@@ -2,13 +2,21 @@ services:
   redis:
     image: redis:7-alpine
     container_name: bw-template-fe-redis
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
+    command:
+      [
+        "redis-server",
+        "--requirepass",
+        "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}",
+        "--appendonly",
+        "yes",
+      ]
     environment:
       REDISCLI_AUTH: ${REDIS_PASSWORD}
+    volumes:
+      - ./data/redis:/data
     # Not published to the host — app-only on the Compose network.
     restart: unless-stopped
     healthcheck:
-      # Prefer REDISCLI_AUTH over `redis-cli -a` so the password is not on argv.
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s

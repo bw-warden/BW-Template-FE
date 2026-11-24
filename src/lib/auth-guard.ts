@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/session";
 import { loadSettings, settingsReady, toMaskedSettings } from "@/lib/settings";
 
 export async function requireAppSession(opts: { admin?: boolean } = {}) {
-  const hasAdmin = countUsers() > 0;
+  const hasAdmin = (await countUsers()) > 0;
   if (!hasAdmin) redirect("/setup");
 
   const user = await getCurrentUser();
@@ -15,7 +15,7 @@ export async function requireAppSession(opts: { admin?: boolean } = {}) {
     redirect("/");
   }
 
-  const settings = loadSettings();
+  const settings = await loadSettings();
   return {
     email: user.email,
     role: user.role,
@@ -30,5 +30,5 @@ export async function redirectIfAuthenticated() {
   if (user) {
     redirect("/");
   }
-  return countUsers() > 0;
+  return (await countUsers()) > 0;
 }

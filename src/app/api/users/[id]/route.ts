@@ -29,7 +29,7 @@ const UpdateUserSchema = z
 export async function PATCH(request: Request, { params }: Params) {
   return withAdmin(async (current) => {
     const { id } = await params;
-    const target = findUserById(id);
+    const target = await findUserById(id);
     if (!target) return jsonError("User not found", 404);
 
     let body: unknown;
@@ -48,32 +48,35 @@ export async function PATCH(request: Request, { params }: Params) {
       if (target.id === current.id) {
         return jsonError("You cannot change your own role", 400);
       }
-      if (target.role === "admin" && countAdmins() <= 1) {
+      if (target.role === "admin" && (await countAdmins()) <= 1) {
         return jsonError("At least one admin is required", 400);
       }
-      updateUserRole(target.id, parsed.data.role);
+      await updateUserRole(target.id, parsed.data.role);
     }
 
     if (parsed.data.password) {
-      updateUserPassword(target.id, await bcrypt.hash(parsed.data.password, 12));
+      await updateUserPassword(
+        target.id,
+        await bcrypt.hash(parsed.data.password, 12),
+      );
     }
 
-    return jsonOk({ users: listUsers() });
+    return jsonOk({ users: await listUsers() });
   });
 }
 
 export async function DELETE(_request: Request, { params }: Params) {
   return withAdmin(async (current) => {
     const { id } = await params;
-    const target = findUserById(id);
+    const target = await findUserById(id);
     if (!target) return jsonError("User not found", 404);
     if (target.id === current.id) {
       return jsonError("You cannot delete your own account", 400);
     }
-    if (target.role === "admin" && countAdmins() <= 1) {
+    if (target.role === "admin" && (await countAdmins()) <= 1) {
       return jsonError("At least one admin is required", 400);
     }
-    deleteUser(target.id);
-    return jsonOk({ users: listUsers() });
+    await deleteUser(target.id);
+    return jsonOk({ users: await listUsers() });
   });
 }

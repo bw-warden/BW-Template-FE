@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     try {
       const fresh = new URL(request.url).searchParams.get("fresh") === "1";
       if (fresh) {
-        const settings = loadSettings();
+        const settings = await loadSettings();
         if (settingsReady(settings)) await syncNow(settings!);
       }
       const { settings, collectionId } = await templatesCollectionId();

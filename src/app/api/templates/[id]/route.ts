@@ -56,7 +56,7 @@ export async function PUT(
 ) {
   return withAdmin(async () => {
     const { id } = await context.params;
-    const settings = loadSettings();
+    const settings = await loadSettings();
     if (!settingsReady(settings)) {
       return jsonError("Bitwarden settings not configured", 400);
     }
@@ -92,7 +92,7 @@ export async function DELETE(
 ) {
   return withAdmin(async () => {
     const { id } = await context.params;
-    const settings = loadSettings();
+    const settings = await loadSettings();
     if (!settingsReady(settings)) {
       return jsonError("Bitwarden settings not configured", 400);
     }

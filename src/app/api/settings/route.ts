@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 
 export async function GET() {
   return withAdmin(async () => {
-    return jsonOk(toMaskedSettings(loadSettings()));
+    return jsonOk(toMaskedSettings(await loadSettings()));
   });
 }
 
@@ -29,8 +29,8 @@ export async function PUT(request: Request) {
       return jsonError(parsed.error.issues[0]?.message || "Invalid settings");
     }
 
-    const next = mergeSettingsUpdate(loadSettings(), parsed.data);
-    saveSettings(next);
+    const next = mergeSettingsUpdate(await loadSettings(), parsed.data);
+    await saveSettings(next);
     return jsonOk(toMaskedSettings(next));
   });
 }

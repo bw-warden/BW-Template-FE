@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   return withAuth(async () => {
-    const settings = loadSettings();
+    const settings = await loadSettings();
     if (!settingsReady(settings)) {
       return jsonError("Bitwarden settings not configured", 400);
     }
@@ -38,7 +38,7 @@ const CreateSchema = z.object({
 
 export async function POST(request: Request) {
   return withAuth(async () => {
-    const settings = loadSettings();
+    const settings = await loadSettings();
     if (!settingsReady(settings)) {
       return jsonError("Bitwarden settings not configured", 400);
     }

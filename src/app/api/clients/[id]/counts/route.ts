@@ -10,7 +10,7 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   return withAuth(async () => {
-    const settings = loadSettings();
+    const settings = await loadSettings();
     if (!settingsReady(settings)) {
       return jsonError("Bitwarden settings not configured", 400);
     }

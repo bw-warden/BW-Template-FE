@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     return jsonError("Too many setup attempts. Try again later.", 429);
   }
 
-  if (countUsers() > 0) {
+  if ((await countUsers()) > 0) {
     return jsonError("Setup is locked — a user already exists", 409);
   }
 
@@ -44,13 +44,13 @@ export async function POST(request: Request) {
   }
 
   // Re-check after parse so a race cannot create a second user.
-  if (countUsers() > 0) {
+  if ((await countUsers()) > 0) {
     return jsonError("Setup is locked — a user already exists", 409);
   }
 
   const id = uuidv4();
   const passwordHash = await bcrypt.hash(parsed.data.password, 12);
-  createUser(id, parsed.data.email, passwordHash, "admin");
+  await createUser(id, parsed.data.email, passwordHash, "admin");
 
   const session = await getSession();
   session.userId = id;

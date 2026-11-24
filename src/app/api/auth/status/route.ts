@@ -7,9 +7,8 @@ export const runtime = "nodejs";
 export async function GET() {
   const user = await getCurrentUser();
   return jsonOk({
-    hasAdmin: countUsers() > 0,
+    hasAdmin: (await countUsers()) > 0,
     authenticated: Boolean(user),
-    // Email only when the session is valid against the DB (not raw cookie).
     email: user?.email ?? null,
   });
 }

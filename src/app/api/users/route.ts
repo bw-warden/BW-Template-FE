@@ -14,7 +14,7 @@ const CreateUserSchema = z.object({
 
 export async function GET() {
   return withAdmin(async (user) => {
-    return jsonOk({ users: listUsers(), currentUserId: user.id });
+    return jsonOk({ users: await listUsers(), currentUserId: user.id });
   });
 }
 
@@ -32,13 +32,13 @@ export async function POST(request: Request) {
       return jsonError(parsed.error.issues[0]?.message || "Invalid input");
     }
 
-    if (findUserByEmail(parsed.data.email)) {
+    if (await findUserByEmail(parsed.data.email)) {
       return jsonError("A user with that email already exists", 409);
     }
 
     const id = uuidv4();
     const passwordHash = await bcrypt.hash(parsed.data.password, 12);
-    createUser(id, parsed.data.email, passwordHash, parsed.data.role);
-    return jsonOk({ users: listUsers() }, { status: 201 });
+    await createUser(id, parsed.data.email, passwordHash, parsed.data.role);
+    return jsonOk({ users: await listUsers() }, { status: 201 });
   });
 }
