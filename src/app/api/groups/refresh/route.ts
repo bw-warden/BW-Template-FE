@@ -1,4 +1,4 @@
-import { jsonError, jsonOk, jsonServerError, withAdmin } from "@/lib/api";
+import { jsonOk, jsonServerError, withAdmin } from "@/lib/api";
 import { refreshGroupsFromBitwarden } from "@/lib/groups";
 
 export const runtime = "nodejs";

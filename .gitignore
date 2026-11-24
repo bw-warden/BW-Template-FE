@@ -21,6 +21,7 @@
 # misc
 .DS_Store
 *.pem
+credentials.json
 
 # debug
 npm-debug.log*
@@ -32,8 +33,16 @@ yarn-error.log*
 .env
 .env*.local
 
-# app data
+# app data (users, encrypted settings, CLI home, branding)
 /data/
+**/bw-home/
+*.db
+*.db-wal
+*.db-shm
+
+# optional tunnel leftovers (bring your own; do not commit tokens)
+cloudflared/*.json
+cloudflared/config.yml
 
 # typescript
 *.tsbuildinfo

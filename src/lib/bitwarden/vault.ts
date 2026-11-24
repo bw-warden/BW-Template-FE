@@ -101,7 +101,7 @@ function bwHome(): string {
 
 /**
  * Minimal env for `bw` children — never pass APP_SECRET, REDIS_URL, or the
- * rest of process.env (those would be readable via /proc/*/environ).
+ * rest of process.env (those would be readable via the process environ).
  */
 function bwEnv(
   homeDir: string,
@@ -117,8 +117,9 @@ function bwEnv(
     "LANG",
     "LC_ALL",
     "TZ",
+    "NODE_ENV",
   ] as const;
-  const env: NodeJS.ProcessEnv = {
+  const env: Record<string, string | undefined> = {
     HOME: homeDir,
     BW_NOINTERACTION: "1",
   };
@@ -129,7 +130,7 @@ function bwEnv(
   for (const [key, value] of Object.entries(extra)) {
     env[key] = value;
   }
-  return env;
+  return env as NodeJS.ProcessEnv;
 }
 
 /** One-shot CLI process. Only used for login/unlock; everything else goes through `bw serve`. */
