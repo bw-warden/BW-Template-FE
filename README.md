@@ -41,31 +41,40 @@ cp .env.example .env
 
 Edit `.env` and set `APP_SECRET` and `REDIS_PASSWORD` to long random strings (32+ characters for `APP_SECRET`). Do not reuse the example values.
 
-3. Build and start (Compose runs **`app` + `redis`**):
+3. Create data directories. On Linux, give the app directory to the container `node` user (uid `1000`) so it can create `bw-home` / branding on first boot. Do **not** `chown -R` into `./data/redis`. Docker Desktop on Windows/macOS usually does not need the `chown`:
+
+```bash
+mkdir -p ./data/app ./data/redis
+sudo chown 1000:1000 ./data/app
+```
+
+4. Build and start (Compose runs **`app` + `redis`**):
 
 ```bash
 docker compose up -d --build
 ```
 
-4. Open http://localhost:3000 (or `http://<host>:3000` on your network)
-5. Complete **Create admin** on first load (`/setup`) — that account is the first (and initially only) admin
-6. Configure Bitwarden under **Settings** (org API key, vault service account, default Shared Folders + groups). Keys are entered in the UI, AES-encrypted in Redis — never committed
+5. Open http://localhost:3000 (or `http://<host>:3000` on your network)
+6. Complete **Create admin** on first load (`/setup`) — that account is the first (and initially only) admin
+7. Configure Bitwarden under **Settings** (org API key, vault service account, default Shared Folders + groups). Keys are entered in the UI, AES-encrypted in Redis — never committed
 
 ### Redis (required)
 
 **Redis is the application database.** Compose starts Redis 7 with AOF persistence on `./data/redis` (internal Docker network only — port not published to the host). The app requires `REDIS_URL` (Compose injects `redis://:${REDIS_PASSWORD}@redis:6379`).
 
-| Stored in Redis | Stored under `./data` (files) |
+| Stored in Redis | Stored under `./data/app` (files) |
 |---|---|
 | Users, AES-encrypted Bitwarden settings, groups, AES-encrypted org API OAuth tokens | Bitwarden CLI home (`bw-home`), uploaded branding |
 
 The app will not start without Redis. Org OAuth tokens and Bitwarden secrets are never stored as plaintext in Redis.
 
-If a legacy `./data/app.db` is present on first boot, the app imports users/settings/groups into Redis once, then renames the old file to `app.db.migrated`.
+If a legacy `./data/app/app.db` is present on first boot, the app imports users/settings/groups into Redis once, then renames the old file to `app.db.migrated`.
 
 ### Data and reset
 
-Redis AOF (`./data/redis`) + CLI home + branding persist under `./data` (gitignored). Stop with `docker compose down`; data remains unless you delete `./data`.
+Compose bind-mounts `./data/redis` into Redis and `./data/app` into the app (CLI home + branding). They stay separate so Redis on-disk files are not exposed inside the app container. Stop with `docker compose down`; data remains unless you delete `./data`.
+
+If you previously ran with `./data` mounted into the app, move `bw-home`, `branding`, and any `app.db*` from `./data/` into `./data/app/`, then recreate the containers.
 
 To return to a blank first-run (re-opens `/setup`):
 
@@ -83,9 +92,8 @@ If you terminate TLS in front of the app (recommended for anything beyond local 
 | Variable | Required | Purpose |
 |---|---|---|
 | `APP_SECRET` | Yes | Session cookie password + AES key for Bitwarden secrets and org tokens in Redis (min 32 chars). Also used as bearer fallback for vault keepalive |
-| `CREDENTIALS_KEY` | No | Alias used if `APP_SECRET` is unset |
 | `COOKIE_SECURE` | No | Set `true` when serving over HTTPS |
-| `DATA_DIR` | No | Defaults to `/app/data` in Docker (CLI home + branding) |
+| `DATA_DIR` | No | Defaults to `/app/data` in Docker (CLI home + branding; host path `./data/app`) |
 | `REDIS_PASSWORD` | Yes (Compose) | Password for the Compose `redis` service; Compose injects `REDIS_URL` from it |
 | `REDIS_URL` | Yes | Redis connection URL (required for app + local `npm run dev`) |
 | `VAULT_KEEPALIVE_MS` | No | In-process keep-alive interval for `bw serve` (default `240000` = 4 min). Set `0` to disable |
@@ -180,7 +188,7 @@ Feel free to swap pieces that fit your environment; the notes below reflect what
 | Bitwarden org API | **Public API** (HTTP) | Groups, Shared Folder (collection) create + access |
 | Bitwarden vault | **CLI `bw`** | Unlock + item create; image pins `cli-v2025.12.1`; keep-alive via instrumentation + `/api/vault/keepalive` |
 | Runtime | **Node.js 22** | Docker base: `node:22-bookworm-slim` |
-| Packaging | **Docker Compose** | `app` + `redis`, port `3000`, volume `./data` |
+| Packaging | **Docker Compose** | `app` + `redis`, port `3000`, volumes `./data/app` + `./data/redis` |
 | Optional edge | Bring your own | Terminate TLS / tunnel (e.g. cloudflared) in front of the app if you want it |
 
 **Out of scope / not in this stack:** Bitwarden user SSO in the UI, or a reverse proxy baked into Compose (bring your own).

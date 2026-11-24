@@ -8,12 +8,12 @@ const PLACEHOLDER_SECRETS = new Set([
   "password",
 ]);
 
-/** Resolves APP_SECRET / CREDENTIALS_KEY and enforces production-safe length. */
+/** Resolves APP_SECRET (legacy CREDENTIALS_KEY fallback) and enforces production-safe length. */
 export function requireAppSecret(): string {
   const secret = process.env.APP_SECRET || process.env.CREDENTIALS_KEY;
   if (!secret || secret.length < 32) {
     throw new Error(
-      "APP_SECRET (or CREDENTIALS_KEY) must be set to a string of at least 32 characters",
+      "APP_SECRET must be set to a string of at least 32 characters",
     );
   }
   if (PLACEHOLDER_SECRETS.has(secret.trim().toLowerCase())) {
