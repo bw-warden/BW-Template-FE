@@ -65,21 +65,71 @@ export function toBwGroupAccess(
   });
 }
 
+function accessFromBwFlags(entry: {
+  manage: boolean;
+  readOnly: boolean;
+  hidePasswords: boolean;
+}): CollectionAccessLevel {
+  if (entry.manage) return "manage";
+  if (entry.readOnly && entry.hidePasswords) return "viewExceptPasswords";
+  if (entry.readOnly) return "view";
+  return "edit";
+}
+
 export function fromBwGroupAccess(
   groups: NonNullable<BwCollection["groups"]> | undefined,
 ): CollectionAccessGrant[] {
   if (!groups?.length) return [];
-  return groups.map((g) => {
-    let access: CollectionAccessLevel;
-    if (g.manage) {
-      access = "manage";
-    } else if (g.readOnly && g.hidePasswords) {
-      access = "viewExceptPasswords";
-    } else if (g.readOnly) {
-      access = "view";
-    } else {
-      access = "edit";
-    }
-    return { groupId: g.id, access };
+  return groups.map((g) => ({
+    groupId: g.id,
+    access: accessFromBwFlags(g),
+  }));
+}
+
+export type ReportAccessGrant = {
+  principalId: string;
+  principal: string;
+  kind: "Group" | "User";
+  access: CollectionAccessLevel;
+  accessLabel: string;
+};
+
+export function accessLevelLabel(access: CollectionAccessLevel): string {
+  return (
+    ACCESS_LEVEL_OPTIONS.find((o) => o.value === access)?.label || access
+  );
+}
+
+/** Map Public API group + user access arrays into report grants. */
+export function fromBwCollectionAccess(opts: {
+  groups?: NonNullable<BwCollection["groups"]>;
+  users?: NonNullable<BwCollection["users"]>;
+  groupNameById: Map<string, string>;
+  userLabelById: Map<string, string>;
+}): ReportAccessGrant[] {
+  const grants: ReportAccessGrant[] = [];
+  for (const g of opts.groups ?? []) {
+    const access = accessFromBwFlags(g);
+    grants.push({
+      principalId: g.id,
+      principal: opts.groupNameById.get(g.id) || g.id,
+      kind: "Group",
+      access,
+      accessLabel: accessLevelLabel(access),
+    });
+  }
+  for (const u of opts.users ?? []) {
+    const access = accessFromBwFlags(u);
+    grants.push({
+      principalId: u.id,
+      principal: opts.userLabelById.get(u.id) || u.id,
+      kind: "User",
+      access,
+      accessLabel: accessLevelLabel(access),
+    });
+  }
+  return grants.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "Group" ? -1 : 1;
+    return a.principal.localeCompare(b.principal);
   });
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { jsonError, jsonOk, jsonServerError, withAuth } from "@/lib/api";
+import { appendAuditEvent } from "@/lib/audit";
 import {
   listClientNodes,
   listCollections,
@@ -37,7 +38,7 @@ const CreateSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  return withAuth(async () => {
+  return withAuth(async (user) => {
     const settings = await loadSettings();
     if (!settingsReady(settings)) {
       return jsonError("Bitwarden settings not configured", 400);
@@ -57,6 +58,13 @@ export async function POST(request: Request) {
 
     try {
       const client = await provisionClient(settings!, parsed.data.name);
+      await appendAuditEvent({
+        actorId: user.id,
+        actorEmail: user.email,
+        action: "client.create",
+        scope: client.name,
+        detail: `Created nested Shared Folders (${client.folders.length})`,
+      });
       return jsonOk({ client });
     } catch (err) {
       return jsonServerError(err);

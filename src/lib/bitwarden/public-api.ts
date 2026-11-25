@@ -16,22 +16,32 @@ import {
   getRegionUrls,
 } from "@/lib/settings";
 
+export type BwCollectionAccessEntry = {
+  id: string;
+  readOnly: boolean;
+  hidePasswords: boolean;
+  manage: boolean;
+};
+
 export type BwCollection = {
   id: string;
   name: string;
   externalId?: string | null;
-  groups?: Array<{
-    id: string;
-    readOnly: boolean;
-    hidePasswords: boolean;
-    manage: boolean;
-  }>;
+  groups?: BwCollectionAccessEntry[];
+  users?: BwCollectionAccessEntry[];
 };
 
 export type BwGroup = {
   id: string;
   name: string;
   externalId?: string | null;
+};
+
+export type BwMember = {
+  id: string;
+  email: string;
+  name: string | null;
+  status: number | null;
 };
 
 type TokenCache = { token: string; expiresAt: number };
@@ -210,6 +220,62 @@ export async function listGroups(
   return all.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+type MemberListResponse = {
+  data?: Array<{
+    id?: string;
+    userId?: string;
+    email?: string;
+    name?: string | null;
+    status?: number | null;
+  }>;
+  continuationToken?: string | null;
+};
+
+/**
+ * Organization members via Public API. Used to resolve collection user
+ * grants to emails on the client report.
+ */
+export async function listPublicMembers(
+  settings: BitwardenSettings,
+): Promise<BwMember[]> {
+  const all: BwMember[] = [];
+  const seen = new Set<string>();
+  let token: string | null | undefined;
+
+  do {
+    const path = token
+      ? `/public/members?continuationToken=${encodeURIComponent(token)}`
+      : "/public/members";
+    const data = await apiFetch<MemberListResponse | BwMember[]>(settings, path);
+    if (Array.isArray(data)) {
+      return data
+        .filter((m) => m?.id && m.email)
+        .map((m) => ({
+          id: m.id,
+          email: m.email,
+          name: m.name ?? null,
+          status: m.status ?? null,
+        }));
+    }
+    for (const m of data.data ?? []) {
+      const id = m.id || m.userId;
+      if (!id || !m.email) continue;
+      all.push({
+        id,
+        email: m.email,
+        name: m.name ?? null,
+        status: m.status ?? null,
+      });
+    }
+    const next = data.continuationToken || null;
+    if (!next || seen.has(next) || seen.size >= 40) break;
+    seen.add(next);
+    token = next;
+  } while (token);
+
+  return all.sort((a, b) => a.email.localeCompare(b.email));
+}
+
 export async function testOrgConnection(
   settings: BitwardenSettings,
 ): Promise<{ ok: boolean; message: string }> {
@@ -309,6 +375,14 @@ export type ClientNode = {
   folders: ClientFolder[];
 };
 
+/** Nested Shared Folder node for reports (arbitrary depth under a client). */
+export type ClientFolderTreeNode = {
+  name: string;
+  path: string;
+  id: string;
+  children: ClientFolderTreeNode[];
+};
+
 /** Client folders are direct children of Clients root: Clients/{Name}. */
 export function listClientNodes(
   collections: BwCollection[],
@@ -346,6 +420,80 @@ export function listClientNodes(
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Full nested Shared Folder tree under a client root path (e.g. Clients/Acme).
+ * Includes every collection whose name is the client path or a descendant.
+ */
+export function buildClientFolderTree(
+  collections: BwCollection[],
+  clientPath: string,
+): ClientFolderTreeNode | null {
+  const path = clientPath.trim();
+  if (!path) return null;
+
+  const rootCol = collections.find(
+    (c) => c.name.trim().toLowerCase() === path.toLowerCase(),
+  );
+  if (!rootCol) return null;
+
+  type Mutable = ClientFolderTreeNode & { _map?: Map<string, Mutable> };
+  const root: Mutable = {
+    name: path.includes("/") ? path.slice(path.lastIndexOf("/") + 1) : path,
+    path,
+    id: rootCol.id,
+    children: [],
+    _map: new Map(),
+  };
+
+  const prefix = `${path}/`;
+  const descendants = collections
+    .filter((c) => c.name.startsWith(prefix) && c.name.length > prefix.length)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const col of descendants) {
+    const rest = col.name.slice(prefix.length);
+    const segments = rest.split("/").filter(Boolean);
+    let parent: Mutable = root;
+    let accum = path;
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      accum = `${accum}/${seg}`;
+      if (!parent._map) parent._map = new Map();
+      let node = parent._map.get(seg);
+      if (!node) {
+        const isLeaf = i === segments.length - 1;
+        node = {
+          name: seg,
+          path: accum,
+          id: isLeaf ? col.id : "",
+          children: [],
+          _map: new Map(),
+        };
+        parent._map.set(seg, node);
+        parent.children.push(node);
+      } else if (i === segments.length - 1) {
+        node.id = col.id;
+        node.path = accum;
+      }
+      parent = node;
+    }
+  }
+
+  function strip(node: Mutable): ClientFolderTreeNode {
+    return {
+      name: node.name,
+      path: node.path,
+      id: node.id,
+      children: node.children
+        .map(strip)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }
+
+  return strip(root);
 }
 
 export function findClientFolder(

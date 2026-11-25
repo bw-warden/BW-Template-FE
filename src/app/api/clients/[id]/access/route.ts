@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { jsonError, jsonOk, jsonServerError, withAdmin } from "@/lib/api";
+import { appendAuditEvent } from "@/lib/audit";
 import {
   findClientFolder,
   findClientNode,
@@ -26,7 +27,7 @@ export async function PUT(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  return withAdmin(async () => {
+  return withAdmin(async (user) => {
     const settings = await loadSettings();
     if (!settingsReady(settings)) {
       return jsonError("Bitwarden settings not configured", 400);
@@ -79,6 +80,15 @@ export async function PUT(
           );
         }),
       );
+
+      const folderNames = parsed.data.folders.map((f) => f.name).join(", ");
+      await appendAuditEvent({
+        actorId: user.id,
+        actorEmail: user.email,
+        action: "access.update",
+        scope: client.name,
+        detail: `Updated group access on ${parsed.data.folders.length} folder(s): ${folderNames}`,
+      });
 
       return jsonOk({
         ok: true,

@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
 import { jsonError, jsonOk } from "@/lib/api";
+import { appendAuditEvent } from "@/lib/audit";
 import { countUsers, createUser } from "@/lib/db";
 import { allowRequest, clientIp } from "@/lib/rate-limit";
 import { getSession } from "@/lib/session";
@@ -57,6 +58,14 @@ export async function POST(request: Request) {
   session.email = emailKey;
   session.isLoggedIn = true;
   await session.save();
+
+  await appendAuditEvent({
+    actorId: id,
+    actorEmail: emailKey,
+    action: "auth.setup",
+    scope: "Auth",
+    detail: "Created initial admin user",
+  });
 
   return jsonOk({ ok: true, email: session.email });
 }

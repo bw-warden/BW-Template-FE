@@ -1,4 +1,5 @@
 import { jsonError, jsonOk, withAdmin } from "@/lib/api";
+import { appendAuditEvent } from "@/lib/audit";
 import {
   loadSettings,
   mergeSettingsUpdate,
@@ -16,7 +17,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  return withAdmin(async () => {
+  return withAdmin(async (user) => {
     let body: unknown;
     try {
       body = await request.json();
@@ -31,6 +32,16 @@ export async function PUT(request: Request) {
 
     const next = mergeSettingsUpdate(await loadSettings(), parsed.data);
     await saveSettings(next);
+    const keys = Object.keys(parsed.data).filter((k) => k !== "vaultMasterPassword");
+    await appendAuditEvent({
+      actorId: user.id,
+      actorEmail: user.email,
+      action: "settings.update",
+      scope: "Settings",
+      detail: keys.length
+        ? `Updated: ${keys.join(", ")}`
+        : "Updated Bitwarden settings",
+    });
     return jsonOk(toMaskedSettings(next));
   });
 }

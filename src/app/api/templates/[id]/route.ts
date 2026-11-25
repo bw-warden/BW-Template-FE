@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { jsonError, jsonOk, jsonServerError, withAdmin, withAuth } from "@/lib/api";
+import { appendAuditEvent } from "@/lib/audit";
 import {
   deleteTemplateItem,
   getItem,
@@ -54,7 +55,7 @@ export async function PUT(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  return withAdmin(async () => {
+  return withAdmin(async (user) => {
     const { id } = await context.params;
     const settings = await loadSettings();
     if (!settingsReady(settings)) {
@@ -79,7 +80,15 @@ export async function PUT(
         notes: parsed.data.notes,
         fields: parsed.data.fields as VaultField[] | undefined,
       });
-      return jsonOk({ template: toSafeTemplate(updated) });
+      const safe = toSafeTemplate(updated);
+      await appendAuditEvent({
+        actorId: user.id,
+        actorEmail: user.email,
+        action: "template.update",
+        scope: "Templates",
+        detail: `Updated template “${safe.name}”`,
+      });
+      return jsonOk({ template: safe });
     } catch (err) {
       return jsonServerError(err);
     }
@@ -90,7 +99,7 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  return withAdmin(async () => {
+  return withAdmin(async (user) => {
     const { id } = await context.params;
     const settings = await loadSettings();
     if (!settingsReady(settings)) {
@@ -98,7 +107,21 @@ export async function DELETE(
     }
 
     try {
+      let templateName = id;
+      try {
+        const item = await getItem(settings!, id);
+        if (item?.name) templateName = item.name;
+      } catch {
+        // still delete even if name lookup fails
+      }
       await deleteTemplateItem(settings!, id);
+      await appendAuditEvent({
+        actorId: user.id,
+        actorEmail: user.email,
+        action: "template.delete",
+        scope: "Templates",
+        detail: `Deleted template “${templateName}”`,
+      });
       return jsonOk({ ok: true });
     } catch (err) {
       return jsonServerError(err);

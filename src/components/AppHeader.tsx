@@ -27,6 +27,7 @@ export function AppHeader({
           { href: "/clients", label: "Clients" },
           { href: "/templates", label: "Templates" },
           { href: "/users", label: "Users" },
+          { href: "/reports", label: "Reports" },
           { href: "/settings", label: "Settings" },
         ]
       : []),

@@ -125,7 +125,8 @@ If you terminate TLS in front of the app (recommended for anything beyond local 
 2. **Clients** (`/clients`, admin): list client Shared Folders and edit live group permissions on each nested folder. Initial load reuses a recent vault sync; **Reload clients** forces a fresh sync
 3. **Templates** (`/templates`): create/delete template field shapes in the Templates Shared Folder
 4. **Users** (`/users`): manage local admin/member accounts
-5. **Settings** (`/settings`): branding logo + Bitwarden connection + configurable default Shared Folders
+5. **Reports** (`/reports`, admin): full audit log (provisions, access changes, auth, settings, etc.) plus per-client Shared Folder reports (nested folders, item names only, group/user permissions). Audit starts recording after deploy — no backfill. CSV export on both views
+6. **Settings** (`/settings`): branding logo + Bitwarden connection + configurable default Shared Folders
 
 ## Vault keep-alive
 

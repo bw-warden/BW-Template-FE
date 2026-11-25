@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { jsonError, jsonOk, jsonServerError, withAdmin, withAuth } from "@/lib/api";
+import { appendAuditEvent } from "@/lib/audit";
 import {
   createTemplateItem,
   listItemsInCollection,
@@ -50,7 +51,7 @@ const CreateSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  return withAdmin(async () => {
+  return withAdmin(async (user) => {
     let body: unknown;
     try {
       body = await request.json();
@@ -71,7 +72,15 @@ export async function POST(request: Request) {
         type: parsed.data.type,
         fields: parsed.data.fields as VaultField[] | undefined,
       });
-      return jsonOk({ template: toSafeTemplate(created) });
+      const safe = toSafeTemplate(created);
+      await appendAuditEvent({
+        actorId: user.id,
+        actorEmail: user.email,
+        action: "template.create",
+        scope: "Templates",
+        detail: `Created template “${safe.name}”`,
+      });
+      return jsonOk({ template: safe });
     } catch (err) {
       return jsonServerError(err);
     }

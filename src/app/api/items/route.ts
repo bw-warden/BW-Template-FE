@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { jsonError, jsonOk, jsonServerError, withAuth } from "@/lib/api";
+import { appendAuditEvent } from "@/lib/audit";
 import {
   findClientFolder,
   findClientNode,
@@ -40,7 +41,7 @@ const CreateItemSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  return withAuth(async () => {
+  return withAuth(async (user) => {
     let body: unknown;
     try {
       body = await request.json();
@@ -77,6 +78,13 @@ export async function POST(request: Request) {
         },
       );
       const count = await countItemsInCollection(settings, folder.id);
+      await appendAuditEvent({
+        actorId: user.id,
+        actorEmail: user.email,
+        action: "item.provision",
+        scope: client.name,
+        detail: `Provisioned “${created.name}” → ${folder.name}`,
+      });
       return jsonOk({ item: created, target: folder.name, count });
     } catch (err) {
       if (err instanceof RequiredFieldsError) {

@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import { z } from "zod";
 import { jsonError, jsonOk, withAdmin } from "@/lib/api";
+import { appendAuditEvent } from "@/lib/audit";
 import {
   countAdmins,
   deleteUser,
@@ -54,11 +55,26 @@ export async function PATCH(request: Request, { params }: Params) {
       await updateUserRole(target.id, parsed.data.role);
     }
 
+    const changes: string[] = [];
+    if (parsed.data.role && parsed.data.role !== target.role) {
+      changes.push(`role → ${parsed.data.role}`);
+    }
     if (parsed.data.password) {
       await updateUserPassword(
         target.id,
         await bcrypt.hash(parsed.data.password, 12),
       );
+      changes.push("password reset");
+    }
+
+    if (changes.length) {
+      await appendAuditEvent({
+        actorId: current.id,
+        actorEmail: current.email,
+        action: "user.update",
+        scope: target.email,
+        detail: changes.join("; "),
+      });
     }
 
     return jsonOk({ users: await listUsers() });
@@ -77,6 +93,13 @@ export async function DELETE(_request: Request, { params }: Params) {
       return jsonError("At least one admin is required", 400);
     }
     await deleteUser(target.id);
+    await appendAuditEvent({
+      actorId: current.id,
+      actorEmail: current.email,
+      action: "user.delete",
+      scope: target.email,
+      detail: `Deleted ${target.role} user`,
+    });
     return jsonOk({ users: await listUsers() });
   });
 }

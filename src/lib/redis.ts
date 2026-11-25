@@ -76,4 +76,6 @@ export const RedisKeys = {
   settings: "bw:settings",
   groups: "bw:groups",
   migratedFlag: "bw:meta:sqlite-migrated",
+  auditIds: "bw:audit:ids",
+  auditEvent: (id: string) => `bw:audit:event:${id}`,
 } as const;

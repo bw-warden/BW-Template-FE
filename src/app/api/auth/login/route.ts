@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import { z } from "zod";
 import { jsonError, jsonOk } from "@/lib/api";
+import { appendAuditEvent } from "@/lib/audit";
 import { findUserByEmail } from "@/lib/db";
 import { syncGroupsInBackground } from "@/lib/groups";
 import { allowRequest, clientIp } from "@/lib/rate-limit";
@@ -62,6 +63,14 @@ export async function POST(request: Request) {
 
   // Warm Bitwarden group cache without blocking login.
   syncGroupsInBackground();
+
+  await appendAuditEvent({
+    actorId: user.id,
+    actorEmail: user.email,
+    action: "auth.login",
+    scope: "Auth",
+    detail: "Signed in",
+  });
 
   return jsonOk({ ok: true, email: user.email });
 }

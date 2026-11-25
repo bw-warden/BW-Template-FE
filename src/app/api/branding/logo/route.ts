@@ -1,6 +1,7 @@
 import fs from "fs";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, jsonOk, withAdmin } from "@/lib/api";
+import { appendAuditEvent } from "@/lib/audit";
 import {
   ALLOWED_LOGO_MIME,
   deleteLogo,
@@ -31,7 +32,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  return withAdmin(async () => {
+  return withAdmin(async (user) => {
     const form = await req.formData();
     const file = form.get("logo");
     if (!(file instanceof File)) {
@@ -48,13 +49,27 @@ export async function POST(req: NextRequest) {
     }
     const buffer = Buffer.from(await file.arrayBuffer());
     const meta = saveLogo(buffer, mimeType);
+    await appendAuditEvent({
+      actorId: user.id,
+      actorEmail: user.email,
+      action: "branding.upload",
+      scope: "Branding",
+      detail: `Uploaded logo (${mimeType})`,
+    });
     return jsonOk({ ok: true, hasCustomLogo: true, meta });
   });
 }
 
 export async function DELETE() {
-  return withAdmin(async () => {
+  return withAdmin(async (user) => {
     const removed = deleteLogo();
+    await appendAuditEvent({
+      actorId: user.id,
+      actorEmail: user.email,
+      action: "branding.delete",
+      scope: "Branding",
+      detail: removed ? "Removed custom logo" : "No custom logo to remove",
+    });
     return jsonOk({ ok: true, hasCustomLogo: false, removed });
   });
 }
